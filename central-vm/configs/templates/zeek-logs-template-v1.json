@@ -1,0 +1,660 @@
+{
+  "index_patterns": [
+    "zeek-logs",
+    "zeek-logs-*",
+    "zeek-conn-*",
+    "zeek-dns-*",
+    "zeek-http-*",
+    "zeek-ssl-*",
+    "zeek-files-*",
+    "zeek-weird-*",
+    "zeek-notice-*",
+    "zeek-dce_rpc-*",
+    "zeek-smb-*",
+    "zeek-kerberos-*",
+    "zeek-x509-*",
+    "zeek-ntlm-*",
+    "zeek-ssh-*",
+    "zeek-ftp-*",
+    "zeek-ldap-*",
+    "zeek-other-*"
+  ],
+  "priority": 500,
+  "template": {
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0,
+      "refresh_interval": "10s"
+    },
+    "mappings": {
+      "dynamic": true,
+      "dynamic_templates": [
+        {
+          "strings_as_keywords": {
+            "match_mapping_type": "string",
+            "mapping": {
+              "type": "keyword",
+              "ignore_above": 8192
+            }
+          }
+        }
+      ],
+      "properties": {
+        "@timestamp": {
+          "type": "date"
+        },
+        "timestamp": {
+          "type": "date"
+        },
+        "ingest_time_vt": {
+          "type": "date"
+        },
+        "ts": {
+          "type": "double"
+        },
+        "sensor": {
+          "type": "keyword"
+        },
+        "log_type": {
+          "type": "keyword"
+        },
+        "log_file": {
+          "type": "keyword",
+          "ignore_above": 4096
+        },
+        "file": {
+          "type": "keyword",
+          "ignore_above": 4096
+        },
+        "source": {
+          "type": "keyword",
+          "ignore_above": 4096
+        },
+        "source_type": {
+          "type": "keyword"
+        },
+        "data_stream": {
+          "properties": {
+            "type": {
+              "type": "keyword"
+            },
+            "dataset": {
+              "type": "keyword"
+            }
+          }
+        },
+        "uid": {
+          "type": "keyword"
+        },
+        "fuid": {
+          "type": "keyword"
+        },
+        "community_id": {
+          "type": "keyword"
+        },
+        "id": {
+          "properties": {
+            "orig_h": {
+              "type": "ip",
+              "ignore_malformed": true
+            },
+            "resp_h": {
+              "type": "ip",
+              "ignore_malformed": true
+            },
+            "orig_p": {
+              "type": "integer",
+              "ignore_malformed": true
+            },
+            "resp_p": {
+              "type": "integer",
+              "ignore_malformed": true
+            }
+          }
+        },
+        "proto": {
+          "type": "keyword"
+        },
+        "ip_proto": {
+          "type": "integer",
+          "ignore_malformed": true
+        },
+        "service": {
+          "type": "keyword"
+        },
+        "conn_state": {
+          "type": "keyword"
+        },
+        "history": {
+          "type": "keyword"
+        },
+        "local_orig": {
+          "type": "boolean"
+        },
+        "local_resp": {
+          "type": "boolean"
+        },
+        "duration": {
+          "type": "double",
+          "ignore_malformed": true
+        },
+        "orig_bytes": {
+          "type": "long",
+          "ignore_malformed": true
+        },
+        "resp_bytes": {
+          "type": "long",
+          "ignore_malformed": true
+        },
+        "missed_bytes": {
+          "type": "long",
+          "ignore_malformed": true
+        },
+        "orig_pkts": {
+          "type": "long",
+          "ignore_malformed": true
+        },
+        "resp_pkts": {
+          "type": "long",
+          "ignore_malformed": true
+        },
+        "orig_ip_bytes": {
+          "type": "long",
+          "ignore_malformed": true
+        },
+        "resp_ip_bytes": {
+          "type": "long",
+          "ignore_malformed": true
+        },
+        "query": {
+          "type": "keyword",
+          "ignore_above": 8192
+        },
+        "answers": {
+          "type": "keyword",
+          "ignore_above": 8192
+        },
+        "qtype": {
+          "type": "integer",
+          "ignore_malformed": true
+        },
+        "qtype_name": {
+          "type": "keyword"
+        },
+        "qclass": {
+          "type": "integer",
+          "ignore_malformed": true
+        },
+        "qclass_name": {
+          "type": "keyword"
+        },
+        "rcode": {
+          "type": "keyword"
+        },
+        "rcode_name": {
+          "type": "keyword"
+        },
+        "opcode": {
+          "type": "keyword"
+        },
+        "opcode_name": {
+          "type": "keyword"
+        },
+        "trans_id": {
+          "type": "long",
+          "ignore_malformed": true
+        },
+        "rtt": {
+          "type": "double",
+          "ignore_malformed": true
+        },
+        "TTLs": {
+          "type": "double",
+          "ignore_malformed": true
+        },
+        "AA": {
+          "type": "boolean"
+        },
+        "RA": {
+          "type": "boolean"
+        },
+        "RD": {
+          "type": "boolean"
+        },
+        "TC": {
+          "type": "boolean"
+        },
+        "Z": {
+          "type": "long",
+          "ignore_malformed": true
+        },
+        "rejected": {
+          "type": "boolean"
+        },
+        "host": {
+          "type": "keyword",
+          "ignore_above": 8192
+        },
+        "uri": {
+          "type": "keyword",
+          "ignore_above": 8192
+        },
+        "referrer": {
+          "type": "keyword",
+          "ignore_above": 8192
+        },
+        "trans_depth": {
+          "type": "integer",
+          "ignore_malformed": true
+        },
+        "request_body_len": {
+          "type": "long",
+          "ignore_malformed": true
+        },
+        "response_body_len": {
+          "type": "long",
+          "ignore_malformed": true
+        },
+        "status_code": {
+          "type": "integer",
+          "ignore_malformed": true
+        },
+        "resp_mime_types": {
+          "type": "keyword",
+          "ignore_above": 4096
+        },
+        "http": {
+          "properties": {
+            "request": {
+              "properties": {
+                "method": {
+                  "type": "keyword"
+                },
+                "body": {
+                  "properties": {
+                    "bytes": {
+                      "type": "long",
+                      "ignore_malformed": true
+                    }
+                  }
+                }
+              }
+            },
+            "response": {
+              "properties": {
+                "status_code": {
+                  "type": "integer",
+                  "ignore_malformed": true
+                }
+              }
+            }
+          }
+        },
+        "url": {
+          "properties": {
+            "path": {
+              "type": "keyword",
+              "ignore_above": 8192
+            }
+          }
+        },
+        "user_agent": {
+          "properties": {
+            "name": {
+              "type": "keyword",
+              "ignore_above": 8192
+            }
+          }
+        },
+        "server_name": {
+          "type": "keyword",
+          "ignore_above": 8192
+        },
+        "version": {
+          "type": "keyword"
+        },
+        "cipher": {
+          "type": "keyword"
+        },
+        "cipher_alg": {
+          "type": "keyword"
+        },
+        "curve": {
+          "type": "keyword"
+        },
+        "resumed": {
+          "type": "boolean"
+        },
+        "established": {
+          "type": "boolean"
+        },
+        "ssl_history": {
+          "type": "keyword"
+        },
+        "sni_matches_cert": {
+          "type": "boolean"
+        },
+        "cert_chain_fps": {
+          "type": "keyword",
+          "ignore_above": 8192
+        },
+        "certificate": {
+          "properties": {
+            "version": {
+              "type": "integer",
+              "ignore_malformed": true
+            },
+            "serial": {
+              "type": "keyword"
+            },
+            "subject": {
+              "type": "keyword",
+              "ignore_above": 8192
+            },
+            "issuer": {
+              "type": "keyword",
+              "ignore_above": 8192
+            },
+            "not_valid_before": {
+              "type": "double",
+              "ignore_malformed": true
+            },
+            "not_valid_after": {
+              "type": "double",
+              "ignore_malformed": true
+            },
+            "key_alg": {
+              "type": "keyword"
+            },
+            "sig_alg": {
+              "type": "keyword"
+            },
+            "key_type": {
+              "type": "keyword"
+            },
+            "key_length": {
+              "type": "integer",
+              "ignore_malformed": true
+            },
+            "curve": {
+              "type": "keyword"
+            },
+            "exponent": {
+              "type": "keyword"
+            }
+          }
+        },
+        "san": {
+          "properties": {
+            "dns": {
+              "type": "keyword",
+              "ignore_above": 8192
+            }
+          }
+        },
+        "basic_constraints": {
+          "properties": {
+            "ca": {
+              "type": "boolean"
+            },
+            "path_len": {
+              "type": "integer",
+              "ignore_malformed": true
+            }
+          }
+        },
+        "filename": {
+          "type": "keyword",
+          "ignore_above": 8192
+        },
+        "mime_type": {
+          "type": "keyword"
+        },
+        "seen_bytes": {
+          "type": "long",
+          "ignore_malformed": true
+        },
+        "total_bytes": {
+          "type": "long",
+          "ignore_malformed": true
+        },
+        "missing_bytes": {
+          "type": "long",
+          "ignore_malformed": true
+        },
+        "overflow_bytes": {
+          "type": "long",
+          "ignore_malformed": true
+        },
+        "md5": {
+          "type": "keyword"
+        },
+        "sha1": {
+          "type": "keyword"
+        },
+        "sha256": {
+          "type": "keyword"
+        },
+        "analyzers": {
+          "type": "keyword"
+        },
+        "depth": {
+          "type": "long",
+          "ignore_malformed": true
+        },
+        "is_orig": {
+          "type": "boolean"
+        },
+        "note": {
+          "type": "keyword"
+        },
+        "msg": {
+          "type": "keyword",
+          "ignore_above": 8192
+        },
+        "notice": {
+          "type": "boolean"
+        },
+        "peer": {
+          "type": "keyword"
+        },
+        "name": {
+          "type": "keyword",
+          "ignore_above": 8192
+        },
+        "path": {
+          "type": "keyword",
+          "ignore_above": 8192
+        },
+        "endpoint": {
+          "type": "keyword"
+        },
+        "operation": {
+          "type": "keyword"
+        },
+        "object": {
+          "type": "keyword",
+          "ignore_above": 8192
+        },
+        "named_pipe": {
+          "type": "keyword"
+        },
+        "auth_success": {
+          "type": "boolean"
+        },
+        "auth_attempts": {
+          "type": "long",
+          "ignore_malformed": true
+        },
+        "username": {
+          "type": "keyword",
+          "ignore_above": 4096
+        },
+        "client": {
+          "type": "keyword",
+          "ignore_above": 4096
+        },
+        "server": {
+          "type": "keyword",
+          "ignore_above": 4096
+        },
+        "command": {
+          "type": "keyword",
+          "ignore_above": 4096
+        },
+        "result": {
+          "type": "keyword",
+          "ignore_above": 4096
+        },
+        "reply_code": {
+          "type": "integer",
+          "ignore_malformed": true
+        },
+        "reply_msg": {
+          "type": "keyword",
+          "ignore_above": 8192
+        },
+        "request_type": {
+          "type": "keyword"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "hostname": {
+          "type": "keyword",
+          "ignore_above": 4096
+        },
+        "domainname": {
+          "type": "keyword",
+          "ignore_above": 4096
+        },
+        "server_nb_computer_name": {
+          "type": "keyword",
+          "ignore_above": 4096
+        },
+        "server_dns_computer_name": {
+          "type": "keyword",
+          "ignore_above": 4096
+        },
+        "host_key_alg": {
+          "type": "keyword"
+        },
+        "host_cert": {
+          "type": "boolean"
+        },
+        "mac_alg": {
+          "type": "keyword"
+        },
+        "kex_alg": {
+          "type": "keyword"
+        },
+        "netflow": {
+          "properties": {
+            "firewall_event": {
+              "type": "keyword"
+            }
+          }
+        },
+        "message": {
+          "type": "keyword",
+          "ignore_above": 8192
+        },
+        "_test_id": {
+          "type": "keyword"
+        },
+        "validation_status": {
+          "type": "keyword"
+        },
+        "sw_version": {
+          "properties": {
+            "major": {
+              "type": "keyword"
+            },
+            "minor": {
+              "type": "keyword"
+            },
+            "minor2": {
+              "type": "keyword"
+            },
+            "minor3": {
+              "type": "keyword"
+            },
+            "addl": {
+              "type": "keyword",
+              "ignore_above": 4096
+            }
+          }
+        },
+        "client_addr": {
+          "type": "ip",
+          "ignore_malformed": true
+        },
+        "server_addr": {
+          "type": "ip",
+          "ignore_malformed": true
+        },
+        "assigned_addr": {
+          "type": "ip",
+          "ignore_malformed": true
+        },
+        "data_channel": {
+          "properties": {
+            "orig_h": {
+              "type": "ip",
+              "ignore_malformed": true
+            },
+            "resp_h": {
+              "type": "ip",
+              "ignore_malformed": true
+            },
+            "resp_p": {
+              "type": "integer",
+              "ignore_malformed": true
+            },
+            "passive": {
+              "type": "boolean"
+            }
+          }
+        },
+        "lease_time": {
+          "type": "double",
+          "ignore_malformed": true
+        },
+        "times": {
+          "properties": {
+            "created": {
+              "type": "double",
+              "ignore_malformed": true
+            },
+            "changed": {
+              "type": "double",
+              "ignore_malformed": true
+            },
+            "accessed": {
+              "type": "double",
+              "ignore_malformed": true
+            },
+            "modified": {
+              "type": "double",
+              "ignore_malformed": true
+            }
+          }
+        },
+        "password": {
+          "type": "keyword",
+          "index": false,
+          "doc_values": false
+        },
+        "cookie": {
+          "type": "keyword",
+          "index": false,
+          "doc_values": false
+        }
+      }
+    }
+  },
+  "_meta": {
+    "description": "Reusable Zeek NDR index template for zeek-logs, zeek-logs-* and routed Zeek indices.",
+    "version": "1.0"
+  }
+}

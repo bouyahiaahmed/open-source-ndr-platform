@@ -1,0 +1,176 @@
+---
+# =========================
+# ZEEK INSTALLATION (SAFE & CONTROLLED)
+# =========================
+
+- name: Gather package facts
+  package_facts:
+    manager: auto
+
+- name: Check if Zeek is already installed
+  set_fact:
+    zeek_installed: "{{ 'zeek' in ansible_facts.packages }}"
+
+- name: Show Zeek installation status
+  debug:
+    msg: "Zeek is {{ 'already installed' if zeek_installed else 'not installed' }}"
+
+# =========================
+# SNAPSHOT MAIL SERVICES (BEFORE)
+# =========================
+
+- name: Gather service facts (before install)
+  service_facts:
+
+- name: Extract existing mail services (before)
+  set_fact:
+    mail_services_before: >-
+      {{
+        ansible_facts.services.keys()
+        | select('search', 'sendmail|postfix|exim')
+        | list
+      }}
+
+- name: Show mail services before install
+  debug:
+    var: mail_services_before
+
+# =========================
+# INSTALL REQUIRED PACKAGES FOR REPO MANAGEMENT
+# =========================
+
+- name: Install required packages for apt repository management
+  apt:
+    name:
+      - gnupg
+      - ca-certificates
+      - apt-transport-https
+    state: present
+    update_cache: yes
+
+
+# =========================
+# ADD ZEEK REPOSITORY (REQUIRED)
+# =========================
+
+- name: Add Zeek repository key
+  apt_key:
+    url: https://download.opensuse.org/repositories/security:/zeek/Debian_12/Release.key
+    state: present
+
+- name: Add Zeek repository
+  apt_repository:
+    repo: "deb https://download.opensuse.org/repositories/security:/zeek/Debian_12/ /"
+    state: present
+    filename: zeek
+
+- name: Update apt cache after adding Zeek repo
+  apt:
+    update_cache: yes
+
+# =========================
+# INSTALL ZEEK (NO RECOMMENDS)
+# =========================
+
+- name: Install Zeek
+  apt:
+    name: zeek
+    state: present
+    install_recommends: no
+    update_cache: yes
+  when: not zeek_installed
+
+# =========================
+# SNAPSHOT MAIL SERVICES (AFTER)
+# =========================
+
+- name: Refresh service facts after install
+  service_facts:
+
+- name: Extract mail services after install
+  set_fact:
+    mail_services_after: >-
+      {{
+        ansible_facts.services.keys()
+        | select('search', 'sendmail|postfix|exim')
+        | list
+      }}
+
+- name: Show mail services after install
+  debug:
+    var: mail_services_after
+
+# =========================
+# DETECT NEW MAIL SERVICES
+# =========================
+
+- name: Compute newly introduced mail services
+  set_fact:
+    mail_services_new: "{{ mail_services_after | difference(mail_services_before) }}"
+
+- name: Show newly introduced mail services
+  debug:
+    msg: "New mail services introduced by Zeek install: {{ mail_services_new }}"
+
+# =========================
+# DISABLE ONLY NEW MAIL SERVICES
+# =========================
+
+- name: Disable newly introduced mail services
+  systemd:
+    name: "{{ item }}"
+    state: stopped
+    enabled: no
+  loop: "{{ mail_services_new }}"
+  when: mail_services_new | length > 0
+
+# =========================
+# VERIFY ZEEK INSTALLATION
+# =========================
+
+- name: Check Zeek binary candidates
+  stat:
+    path: "{{ item }}"
+  loop:
+    - /opt/zeek/bin/zeek
+    - /usr/local/zeek/bin/zeek
+    - /usr/bin/zeek
+  register: zeek_bin_candidates
+
+- name: Select Zeek binary
+  set_fact:
+    zeek_bin: >-
+      {{
+        (
+          zeek_bin_candidates.results
+          | selectattr('stat.exists')
+          | map(attribute='item')
+          | list
+          | first
+        ) | default('')
+      }}
+
+- name: Fail if Zeek binary not found
+  fail:
+    msg: "Zeek binary not found after installation."
+  when: zeek_bin == ""
+
+- name: Derive zeekctl path
+  set_fact:
+    zeekctl_bin: "{{ zeek_bin | dirname }}/zeekctl"
+
+- name: Verify Zeek version
+  command: "{{ zeek_bin }} --version"
+  register: zeek_version
+  changed_when: false
+
+- name: Verify ZeekControl version
+  command: "{{ zeekctl_bin }} --version"
+  register: zeekctl_version
+  changed_when: false
+
+- name: Show Zeek versions
+  debug:
+    msg:
+      - "Zeek version: {{ zeek_version.stdout }}"
+      - "ZeekControl version: {{ zeekctl_version.stdout }}"

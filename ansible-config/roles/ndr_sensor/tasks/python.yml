@@ -1,0 +1,7 @@
+- name: Install Zeek Python dependencies
+  become: true
+  apt:
+    name:
+      - python3-websockets
+    state: present
+    update_cache: yes

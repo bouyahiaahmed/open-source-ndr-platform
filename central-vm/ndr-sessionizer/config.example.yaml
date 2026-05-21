@@ -1,0 +1,29 @@
+opensearch_url: "https://opensearch:9200"
+opensearch_username: "admin"
+opensearch_password: "admin"
+opensearch_ca_cert: "/certs/ca/ca.crt"
+opensearch_verify_certs: true
+
+source_index_pattern: "zeek-logs*"
+target_index_prefix: "ndr-sessions"
+state_index: "ndr-sessionizer-state"
+
+poll_interval_seconds: 30
+lookback_overlap_seconds: 120
+initial_lookback_seconds: 300
+bulk_size: 500
+read_page_size: 500
+max_events_per_log_type_per_session: 20
+max_evidence_items: 100
+preserve_raw_event_fields: true
+
+run_once: false
+dry_run: false
+http_host: "0.0.0.0"
+http_port: 8080
+service_version: "0.1.0"
+checkpoint_id: "default"
+
+# Optional: currently the builder primarily uses Zeek local_orig/local_resp.
+# Keep this for future explicit CIDR-based direction logic.
+local_networks: []

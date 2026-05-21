@@ -1,0 +1,120 @@
+# Copy/paste these services under `services:` in docker/docker-compose.yml,
+# or run them as an override after adjusting paths if needed.
+
+  ndr-behaviorizer-template-init:
+    image: curlimages/curl:8.10.1
+    container_name: ndr-behaviorizer-template-init
+    restart: "no"
+
+    depends_on:
+      opensearch:
+        condition: service_healthy
+
+    environment:
+      OPENSEARCH_URL: "https://opensearch-node1:9200"
+      OPENSEARCH_USERNAME: "${NDR_ADMIN_USERNAME:-admin}"
+      OPENSEARCH_PASSWORD: "${NDR_ADMIN_PASSWORD:-admin}"
+      CA_CERT: "/certs/ca/ca.crt"
+
+    volumes:
+      - ../ndr-behaviorizer/mappings:/mappings:ro
+      - ../certs/ca/ca.crt:/certs/ca/ca.crt:ro
+
+    command: >
+      sh -c '
+        echo "Waiting for OpenSearch...";
+        until curl --cacert "$$CA_CERT" -s -u "$$OPENSEARCH_USERNAME:$$OPENSEARCH_PASSWORD" "$$OPENSEARCH_URL/_cluster/health" >/dev/null; do
+          echo "OpenSearch not ready yet...";
+          sleep 5;
+        done;
+
+        for item in \
+          "ndr-behaviors-template:/mappings/ndr-behaviors-template.json" \
+          "ndr-behaviorizer-state-template:/mappings/ndr-behaviorizer-state-template.json" \
+          "ndr-ml-models-template:/mappings/ndr-ml-models-template.json" \
+          "ndr-findings-template:/mappings/ndr-findings-template.json"; do
+          name="$${item%%:*}";
+          file="$${item#*:}";
+          echo "Applying $$name from $$file";
+          curl --cacert "$$CA_CERT" -sS -u "$$OPENSEARCH_USERNAME:$$OPENSEARCH_PASSWORD" \
+            -H "Content-Type: application/json" \
+            -X PUT "$$OPENSEARCH_URL/_index_template/$$name" \
+            --data-binary "@$$file";
+          echo;
+        done;
+        echo "NDR behaviorizer templates applied.";
+      '
+
+    networks:
+      - backend
+
+  ndr-behaviorizer:
+    build:
+      context: ../ndr-behaviorizer
+      dockerfile: Dockerfile
+    image: ndr-behaviorizer:0.2.0
+    container_name: ndr-behaviorizer
+    restart: unless-stopped
+
+    depends_on:
+      ndr-behaviorizer-template-init:
+        condition: service_completed_successfully
+      ndr-sessionizer:
+        condition: service_started
+
+    environment:
+      OPENSEARCH_URL: "https://opensearch-node1:9200"
+      OPENSEARCH_USERNAME: "${NDR_ADMIN_USERNAME:-admin}"
+      OPENSEARCH_PASSWORD: "${NDR_ADMIN_PASSWORD:-admin}"
+      OPENSEARCH_CA_CERT: "/certs/ca/ca.crt"
+      OPENSEARCH_VERIFY_CERTS: "true"
+
+      SOURCE_INDEX_PATTERN: "ndr-sessions*"
+      TARGET_INDEX_PREFIX: "ndr-behaviors"
+      STATE_INDEX: "ndr-behaviorizer-state"
+      PROCESS_TIME_FIELD: "sessionizer.updated_at"
+      EVENT_TIME_FIELD: "@timestamp"
+
+      BEHAVIOR_WINDOW_SECONDS: "3600"
+      LOOKBACK_OVERLAP_SECONDS: "7200"
+      INITIAL_LOOKBACK_SECONDS: "86400"
+      POLL_INTERVAL_SECONDS: "60"
+      READ_PAGE_SIZE: "500"
+      BULK_SIZE: "500"
+
+      FEATURE_SET: "host_hourly_v1"
+      FEATURE_CONFIG_PATH: "/app/features/host_hourly_v1.yaml"
+      BEHAVIOR_ENTITY_MODE: "host_sensor"
+
+      RUN_ONCE: "false"
+      DRY_RUN: "false"
+      CHECKPOINT_ID: "default"
+      HTTP_PORT: "8080"
+      SERVICE_VERSION: "0.2.0"
+
+      ML_ENABLED: "true"
+      ML_MIN_TRAINING_ROWS: "20"
+      ML_CONTAMINATION: "0.05"
+      ML_TRAINING_MAX_DOCS: "2000"
+      ML_TRAINING_MIN_QUALITY_SCORE: "80"
+      ML_SCORE_CURRENT_ONLY: "true"
+      BEHAVIOR_MAX_SESSION_REFS: "200"
+      BEHAVIOR_MIN_SESSIONS_FOR_ML: "2"
+      ML_MODEL_ARTIFACT_PATH: "/tmp/ndr_behaviorizer_model.pkl"
+      FINDINGS_ENABLED: "true"
+      FINDINGS_INDEX_PREFIX: "ndr-findings"
+
+    volumes:
+      - ../certs/ca/ca.crt:/certs/ca/ca.crt:ro
+
+    ports:
+      - "8091:8080"
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/readyz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+    networks:
+      - backend

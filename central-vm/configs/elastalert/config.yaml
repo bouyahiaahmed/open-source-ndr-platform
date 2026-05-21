@@ -1,0 +1,55 @@
+# ============================================================
+# ElastAlert2 global config for OpenSearch
+# ============================================================
+
+rules_folder: /opt/elastalert/rules
+scan_subdirectories: true
+
+run_every:
+  seconds: 30
+
+buffer_time:
+  minutes: 5
+
+# OpenSearch connection
+# Actual host/user/password can be overridden by env vars:
+# ES_HOST, ES_PORT, ES_USERNAME, ES_PASSWORD, ES_USE_SSL
+es_host: opensearch-node1
+es_port: 9200
+
+use_ssl: true
+verify_certs: true
+ca_certs: /opt/elastalert/certs/ca.crt
+ssl_show_warn: true
+
+# Basic auth
+# You can keep these omitted if using env vars from docker-compose
+# es_username: admin
+# es_password: changeme
+
+# ElastAlert2 internal state index
+writeback_index: elastalert_status
+
+# Alert records index created by indexer alerter
+indexer_alerts_name: ndr-alerts
+
+alert_time_limit:
+  days: 2
+
+# Prevent bad rule files from killing the whole service
+skip_invalid: false
+
+# Query behavior
+max_query_size: 10000
+old_query_limit:
+  days: 2
+
+# ============================================================
+# Email / SMTP config - Gmail sender
+# ============================================================
+
+smtp_host: smtp.gmail.com
+smtp_port: 587
+smtp_ssl: false
+from_addr: "NDR ElastAlert <testiss187@gmail.com>"
+smtp_auth_file: /opt/elastalert/secrets/smtp_auth.yaml

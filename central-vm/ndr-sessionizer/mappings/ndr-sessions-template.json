@@ -1,0 +1,746 @@
+{
+  "index_patterns": [
+    "ndr-sessions-*"
+  ],
+  "template": {
+    "settings": {
+      "index": {
+        "number_of_shards": 1,
+        "number_of_replicas": 0,
+        "refresh_interval": "10s"
+      }
+    },
+    "mappings": {
+      "dynamic": false,
+      "properties": {
+        "@timestamp": {
+          "type": "date"
+        },
+        "doc": {
+          "properties": {
+            "type": {
+              "type": "keyword"
+            }
+          }
+        },
+        "session": {
+          "properties": {
+            "id": {
+              "type": "keyword"
+            },
+            "uid": {
+              "type": "keyword"
+            },
+            "community_id": {
+              "type": "keyword"
+            },
+            "first_seen": {
+              "type": "date"
+            },
+            "last_seen": {
+              "type": "date"
+            },
+            "log_types": {
+              "type": "keyword"
+            },
+            "event_count": {
+              "type": "integer"
+            },
+            "has_notice": {
+              "type": "boolean"
+            },
+            "has_weird": {
+              "type": "boolean"
+            },
+            "has_files": {
+              "type": "boolean"
+            },
+            "has_tls": {
+              "type": "boolean"
+            },
+            "has_http": {
+              "type": "boolean"
+            },
+            "has_dns": {
+              "type": "boolean"
+            },
+            "has_ssh": {
+              "type": "boolean"
+            },
+            "evidence_count": {
+              "type": "long"
+            },
+            "raw_event_count": {
+              "type": "long"
+            },
+            "normalized_event_count": {
+              "type": "long"
+            },
+            "events_truncated": {
+              "type": "boolean"
+            },
+            "category": {
+              "type": "keyword"
+            },
+            "excluded_from_behavior": {
+              "type": "boolean"
+            },
+            "noise_reasons": {
+              "type": "keyword"
+            },
+            "key_type": {
+              "type": "keyword"
+            },
+            "flow_based": {
+              "type": "boolean"
+            }
+          }
+        },
+        "sensor": {
+          "properties": {
+            "name": {
+              "type": "keyword"
+            }
+          }
+        },
+        "source": {
+          "properties": {
+            "ip": {
+              "type": "ip"
+            },
+            "port": {
+              "type": "integer"
+            },
+            "local": {
+              "type": "boolean"
+            }
+          }
+        },
+        "destination": {
+          "properties": {
+            "ip": {
+              "type": "ip"
+            },
+            "port": {
+              "type": "integer"
+            },
+            "local": {
+              "type": "boolean"
+            }
+          }
+        },
+        "network": {
+          "properties": {
+            "transport": {
+              "type": "keyword"
+            },
+            "protocol": {
+              "type": "keyword"
+            },
+            "community_id": {
+              "type": "keyword"
+            },
+            "bytes": {
+              "type": "long"
+            },
+            "packets": {
+              "type": "long"
+            },
+            "direction": {
+              "type": "keyword"
+            },
+            "protocols": {
+              "type": "keyword"
+            },
+            "scope": {
+              "type": "keyword"
+            },
+            "same_subnet": {
+              "type": "boolean"
+            },
+            "same_spoke": {
+              "type": "boolean"
+            },
+            "same_vnet": {
+              "type": "boolean"
+            },
+            "asset": {
+              "properties": {
+                "ip": {
+                  "type": "ip"
+                },
+                "side": {
+                  "type": "keyword"
+                },
+                "spoke": {
+                  "type": "keyword"
+                },
+                "vnet": {
+                  "type": "keyword"
+                },
+                "subnet": {
+                  "type": "keyword"
+                },
+                "subnet_cidr": {
+                  "type": "keyword"
+                },
+                "scope": {
+                  "type": "keyword"
+                }
+              }
+            }
+          }
+        },
+        "conn": {
+          "properties": {
+            "state": {
+              "type": "keyword"
+            },
+            "duration": {
+              "type": "double"
+            },
+            "orig_bytes": {
+              "type": "long"
+            },
+            "resp_bytes": {
+              "type": "long"
+            },
+            "orig_pkts": {
+              "type": "long"
+            },
+            "resp_pkts": {
+              "type": "long"
+            },
+            "history": {
+              "type": "keyword"
+            },
+            "missed_bytes": {
+              "type": "long"
+            }
+          }
+        },
+        "dns": {
+          "properties": {
+            "query": {
+              "type": "keyword"
+            },
+            "qtype": {
+              "type": "integer"
+            },
+            "qtype_name": {
+              "type": "keyword"
+            },
+            "rcode": {
+              "type": "keyword"
+            },
+            "rcode_name": {
+              "type": "keyword"
+            },
+            "answers": {
+              "type": "keyword"
+            },
+            "ttls": {
+              "type": "double"
+            },
+            "query_length": {
+              "type": "integer"
+            },
+            "label_count": {
+              "type": "integer"
+            },
+            "longest_label_length": {
+              "type": "integer"
+            },
+            "is_txt": {
+              "type": "boolean"
+            },
+            "is_nxdomain": {
+              "type": "boolean"
+            }
+          }
+        },
+        "http": {
+          "properties": {
+            "host": {
+              "type": "keyword"
+            },
+            "method": {
+              "type": "keyword"
+            },
+            "uri": {
+              "type": "keyword"
+            },
+            "status_code": {
+              "type": "integer"
+            },
+            "user_agent": {
+              "type": "keyword"
+            },
+            "request_body_bytes": {
+              "type": "long"
+            },
+            "response_body_bytes": {
+              "type": "long"
+            },
+            "referrer": {
+              "type": "keyword"
+            }
+          }
+        },
+        "tls": {
+          "properties": {
+            "server_name": {
+              "type": "keyword"
+            },
+            "version": {
+              "type": "keyword"
+            },
+            "cipher": {
+              "type": "keyword"
+            },
+            "curve": {
+              "type": "keyword"
+            },
+            "validation_status": {
+              "type": "keyword"
+            },
+            "established": {
+              "type": "boolean"
+            },
+            "resumed": {
+              "type": "boolean"
+            },
+            "sni_matches_cert": {
+              "type": "boolean"
+            },
+            "next_protocol": {
+              "type": "keyword"
+            }
+          }
+        },
+        "x509": {
+          "properties": {
+            "subject": {
+              "type": "keyword"
+            },
+            "issuer": {
+              "type": "keyword"
+            },
+            "serial": {
+              "type": "keyword"
+            },
+            "not_valid_before": {
+              "type": "double"
+            },
+            "not_valid_after": {
+              "type": "double"
+            },
+            "key_type": {
+              "type": "keyword"
+            },
+            "key_alg": {
+              "type": "keyword"
+            },
+            "key_length": {
+              "type": "integer"
+            },
+            "sig_alg": {
+              "type": "keyword"
+            },
+            "san_dns": {
+              "type": "keyword"
+            },
+            "basic_constraints_ca": {
+              "type": "boolean"
+            },
+            "fingerprints": {
+              "type": "keyword"
+            },
+            "subjects": {
+              "type": "keyword"
+            },
+            "issuers": {
+              "type": "keyword"
+            },
+            "key_types": {
+              "type": "keyword"
+            },
+            "key_lengths": {
+              "type": "integer"
+            },
+            "signature_algorithms": {
+              "type": "keyword"
+            },
+            "is_ca": {
+              "type": "boolean"
+            }
+          }
+        },
+        "notice": {
+          "properties": {
+            "notes": {
+              "type": "keyword"
+            },
+            "messages": {
+              "type": "keyword"
+            },
+            "actions": {
+              "type": "keyword"
+            },
+            "subs": {
+              "type": "keyword"
+            },
+            "suppress_for": {
+              "type": "double"
+            }
+          }
+        },
+        "weird": {
+          "properties": {
+            "names": {
+              "type": "keyword"
+            },
+            "messages": {
+              "type": "keyword"
+            }
+          }
+        },
+        "analyzer": {
+          "properties": {
+            "names": {
+              "type": "keyword"
+            },
+            "kinds": {
+              "type": "keyword"
+            },
+            "failure_reasons": {
+              "type": "keyword"
+            }
+          }
+        },
+        "files": {
+          "properties": {
+            "fuids": {
+              "type": "keyword"
+            },
+            "mime_types": {
+              "type": "keyword"
+            },
+            "md5": {
+              "type": "keyword"
+            },
+            "sha1": {
+              "type": "keyword"
+            },
+            "sha256": {
+              "type": "keyword"
+            },
+            "seen_bytes": {
+              "type": "long"
+            },
+            "total_bytes": {
+              "type": "long"
+            },
+            "missing_bytes": {
+              "type": "long"
+            },
+            "overflow_bytes": {
+              "type": "long"
+            },
+            "filenames": {
+              "type": "keyword"
+            },
+            "count": {
+              "type": "long"
+            },
+            "mime_type_count": {
+              "type": "long"
+            },
+            "hash_count": {
+              "type": "long"
+            }
+          }
+        },
+        "ssh": {
+          "properties": {
+            "auth_success": {
+              "type": "boolean"
+            },
+            "auth_attempts": {
+              "type": "long"
+            },
+            "client": {
+              "type": "keyword"
+            },
+            "server": {
+              "type": "keyword"
+            },
+            "cipher_alg": {
+              "type": "keyword"
+            },
+            "mac_alg": {
+              "type": "keyword"
+            },
+            "kex_alg": {
+              "type": "keyword"
+            },
+            "host_key_alg": {
+              "type": "keyword"
+            },
+            "host_key_fingerprint": {
+              "type": "keyword"
+            }
+          }
+        },
+        "ftp": {
+          "properties": {
+            "user": {
+              "type": "keyword"
+            },
+            "command": {
+              "type": "keyword"
+            },
+            "reply_code": {
+              "type": "integer"
+            },
+            "reply_msg": {
+              "type": "keyword"
+            },
+            "data_channel_orig_h": {
+              "type": "ip"
+            },
+            "data_channel_resp_h": {
+              "type": "ip"
+            },
+            "data_channel_resp_p": {
+              "type": "integer"
+            },
+            "data_channel_passive": {
+              "type": "boolean"
+            }
+          }
+        },
+        "smtp": {
+          "properties": {
+            "helo": {
+              "type": "keyword"
+            },
+            "mailfrom": {
+              "type": "keyword"
+            },
+            "rcptto": {
+              "type": "keyword"
+            },
+            "from": {
+              "type": "keyword"
+            },
+            "to": {
+              "type": "keyword"
+            },
+            "subject": {
+              "type": "keyword"
+            },
+            "date": {
+              "type": "keyword"
+            },
+            "msg_id": {
+              "type": "keyword"
+            },
+            "last_reply": {
+              "type": "keyword"
+            },
+            "is_webmail": {
+              "type": "boolean"
+            },
+            "tls": {
+              "type": "boolean"
+            }
+          }
+        },
+        "smb": {
+          "properties": {
+            "operations": {
+              "type": "keyword"
+            },
+            "paths": {
+              "type": "keyword"
+            },
+            "names": {
+              "type": "keyword"
+            },
+            "named_pipes": {
+              "type": "keyword"
+            },
+            "share_types": {
+              "type": "keyword"
+            },
+            "usernames": {
+              "type": "keyword"
+            },
+            "hostnames": {
+              "type": "keyword"
+            },
+            "server_dns_computer_names": {
+              "type": "keyword"
+            },
+            "server_nb_computer_names": {
+              "type": "keyword"
+            },
+            "success_values": {
+              "type": "boolean"
+            }
+          }
+        },
+        "ldap": {
+          "properties": {
+            "operations": {
+              "type": "keyword"
+            },
+            "arguments": {
+              "type": "keyword"
+            },
+            "results": {
+              "type": "keyword"
+            }
+          }
+        },
+        "dhcp": {
+          "properties": {
+            "assigned_addr": {
+              "type": "ip"
+            },
+            "client_addr": {
+              "type": "ip"
+            },
+            "server_addr": {
+              "type": "ip"
+            },
+            "host_name": {
+              "type": "keyword"
+            },
+            "domain": {
+              "type": "keyword"
+            },
+            "lease_time": {
+              "type": "double"
+            },
+            "mac": {
+              "type": "keyword"
+            },
+            "msg_types": {
+              "type": "keyword"
+            }
+          }
+        },
+        "irc": {
+          "properties": {
+            "nick": {
+              "type": "keyword"
+            },
+            "command": {
+              "type": "keyword"
+            },
+            "value": {
+              "type": "keyword"
+            },
+            "addl": {
+              "type": "keyword"
+            }
+          }
+        },
+        "evidence": {
+          "properties": {
+            "id": {
+              "type": "keyword"
+            },
+            "index": {
+              "type": "keyword"
+            },
+            "log_type": {
+              "type": "keyword"
+            },
+            "timestamp": {
+              "type": "date"
+            },
+            "uid": {
+              "type": "keyword"
+            },
+            "community_id": {
+              "type": "keyword"
+            }
+          }
+        },
+        "sessionizer": {
+          "properties": {
+            "version": {
+              "type": "keyword"
+            },
+            "updated_at": {
+              "type": "date"
+            }
+          }
+        },
+        "zeek": {
+          "type": "object",
+          "enabled": false
+        },
+        "cloud": {
+          "properties": {
+            "provider": {
+              "type": "keyword"
+            },
+            "azure": {
+              "properties": {
+                "source": {
+                  "properties": {
+                    "scope": {
+                      "type": "keyword"
+                    },
+                    "spoke": {
+                      "type": "keyword"
+                    },
+                    "vnet": {
+                      "type": "keyword"
+                    },
+                    "subnet": {
+                      "type": "keyword"
+                    },
+                    "subnet_cidr": {
+                      "type": "keyword"
+                    }
+                  }
+                },
+                "destination": {
+                  "properties": {
+                    "scope": {
+                      "type": "keyword"
+                    },
+                    "spoke": {
+                      "type": "keyword"
+                    },
+                    "vnet": {
+                      "type": "keyword"
+                    },
+                    "subnet": {
+                      "type": "keyword"
+                    },
+                    "subnet_cidr": {
+                      "type": "keyword"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "priority": 500,
+  "_meta": {
+    "service": "ndr-sessionizer",
+    "version": "0.1.0",
+    "raw_zeek_strategy": "disabled_object",
+    "note": "Stable normalized fields are indexed. Full raw Zeek event preservation is stored under zeek with enabled=false to avoid mapping explosion."
+  }
+}

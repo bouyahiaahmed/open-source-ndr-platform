@@ -1,0 +1,7 @@
+- import_tasks: ca.yml
+- import_tasks: python.yml
+- import_tasks: offload.yml
+- import_tasks: install_zeek.yml
+- import_tasks: zeek.yml
+- import_tasks: vector.yml
+- import_tasks: validate.yml

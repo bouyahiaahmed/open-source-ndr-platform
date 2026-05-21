@@ -1,0 +1,29 @@
+---
+- name: Update CA trust
+  command: update-ca-certificates
+  when: not ansible_check_mode
+  listen: update ca trust
+
+- name: Systemd daemon reload
+  systemd:
+    daemon_reload: true
+  when: not ansible_check_mode
+  listen: systemd daemon reload
+
+- name: restart vector
+  become: true
+  systemd:
+    name: "{{ vector_service_name }}"
+    state: restarted
+  when: not ansible_check_mode
+
+# Uses zeekctl_bin set by zeek.yml — NOT hardcoded to /opt/zeek.
+# If zeek.yml has not run yet in this play, this handler will be a no-op
+# because zeekctl_bin won't be defined. That is the correct behaviour.
+- name: restart zeek
+  command: "{{ zeekctl_bin | default('/opt/zeek/bin/zeekctl') }} deploy"
+  become: true
+  when:
+    - not ansible_check_mode
+    - zeekctl_bin is defined
+  listen: restart zeek

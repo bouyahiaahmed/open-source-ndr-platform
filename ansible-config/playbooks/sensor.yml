@@ -1,0 +1,5 @@
+- name: Prepare NDR sensor VMs (Zeek + Vector -> Data Prepper)
+  hosts: sensors
+  gather_facts: true
+  roles:
+    - ndr_sensor

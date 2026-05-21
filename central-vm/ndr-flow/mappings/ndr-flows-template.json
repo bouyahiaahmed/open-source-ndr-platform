@@ -1,0 +1,101 @@
+{
+  "index_patterns": ["ndr-flows-*"],
+  "priority": 350,
+  "template": {
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0
+    },
+    "mappings": {
+      "dynamic": true,
+      "properties": {
+        "@timestamp": { "type": "date" },
+        "event": {
+          "properties": {
+            "dataset": { "type": "keyword" },
+            "module": { "type": "keyword" },
+            "kind": { "type": "keyword" },
+            "category": { "type": "keyword" },
+            "type": { "type": "keyword" }
+          }
+        },
+        "observer": {
+          "properties": {
+            "type": { "type": "keyword" },
+            "vendor": { "type": "keyword" },
+            "ip": { "type": "ip" }
+          }
+        },
+        "source": {
+          "properties": {
+            "ip": { "type": "ip" },
+            "port": { "type": "integer" },
+            "mac": { "type": "keyword" },
+            "vlan": {
+              "properties": {
+                "id": { "type": "integer" }
+              }
+            }
+          }
+        },
+        "destination": {
+          "properties": {
+            "ip": { "type": "ip" },
+            "port": { "type": "integer" },
+            "mac": { "type": "keyword" },
+            "vlan": {
+              "properties": {
+                "id": { "type": "integer" }
+              }
+            }
+          }
+        },
+        "network": {
+          "properties": {
+            "transport": { "type": "keyword" },
+            "iana_number": { "type": "keyword" },
+            "bytes": { "type": "long" },
+            "packets": { "type": "long" },
+            "direction": { "type": "keyword" }
+          }
+        },
+        "flow": {
+          "properties": {
+            "id": { "type": "keyword" },
+            "start": { "type": "date" },
+            "end": { "type": "date" },
+            "duration": {
+              "properties": {
+                "ms": { "type": "long" }
+              }
+            }
+          }
+        },
+        "netflow": {
+          "properties": {
+            "version": { "type": "keyword" },
+            "sequence_num": { "type": "long" },
+            "sampling_rate": { "type": "long" },
+            "in_interface": { "type": "long" },
+            "out_interface": { "type": "long" },
+            "tcp_flags": { "type": "integer" },
+            "ip_tos": { "type": "integer" },
+            "forwarding_status": { "type": "integer" }
+          }
+        },
+        "ndr": {
+          "properties": {
+            "source_type": { "type": "keyword" },
+            "collector": { "type": "keyword" },
+            "env": { "type": "keyword" },
+            "pipeline": { "type": "keyword" }
+          }
+        },
+        "goflow2": {
+          "type": "object",
+          "dynamic": true
+        }
+      }
+    }
+  }
+}

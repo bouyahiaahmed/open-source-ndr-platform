@@ -1,0 +1,21 @@
+server.name: dashboards
+server.host: "0.0.0.0"
+server.port: 5601
+
+# ✅ Enable HTTPS for Dashboards
+server.ssl.enabled: true
+server.ssl.certificate: /usr/share/opensearch-dashboards/config/certs/dashboards/dashboards.crt
+server.ssl.key: /usr/share/opensearch-dashboards/config/certs/dashboards/dashboards.key
+
+# (Optional but nice) tighten TLS a bit
+# server.ssl.supportedProtocols: ["TLSv1.2", "TLSv1.3"]
+
+# ✅ Keep full TLS verification to OpenSearch
+opensearch.hosts: ["https://opensearch-node1:9200"]
+opensearch.ssl.certificateAuthorities: ["/usr/share/opensearch-dashboards/config/certs/ca/ca.crt"]
+opensearch.ssl.verificationMode: full
+
+opensearch.username: ${OS_DASHBOARDS_USERNAME}
+opensearch.password: ${OS_DASHBOARDS_PASSWORD}
+
+# Keep security plugin enabled (default)

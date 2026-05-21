@@ -1,0 +1,12 @@
+{
+  "@timestamp": "2026-05-06T16:10:00Z",
+  "session": {"id": "http-1", "first_seen": "2026-05-06T16:10:00Z", "last_seen": "2026-05-06T16:10:03Z", "log_types": ["conn", "http", "files"], "flow_based": true, "excluded_from_behavior": false, "has_http": true, "has_files": true},
+  "sessionizer": {"updated_at": "2026-05-06T16:10:04Z"},
+  "sensor": {"name": "sensor1"},
+  "source": {"ip": "192.168.25.129", "port": 53001, "local": true},
+  "destination": {"ip": "93.184.216.34", "port": 80, "local": false},
+  "network": {"protocol": "http", "protocols": ["http"], "transport": "tcp", "direction": "outbound", "bytes": 2500, "packets": 10},
+  "conn": {"duration": 2.5, "orig_bytes": 500, "resp_bytes": 2000, "orig_pkts": 4, "resp_pkts": 6},
+  "http": {"host": "example.com", "method": "GET", "uri": "/download", "status_code": 200, "user_agent": "curl/8.0", "response_body_bytes": 2048},
+  "files": {"count": 1, "fuids": ["F1"], "mime_types": ["application/octet-stream"], "hash_count": 3, "total_bytes": 2048, "md5": ["a"], "sha1": ["b"], "sha256": ["c"]}
+}

@@ -1,0 +1,15 @@
+---
+- name: Install internal CA certificate (Debian/Ubuntu)
+  ansible.builtin.copy:
+    src: ndr-internal-ca.crt
+    dest: /usr/local/share/ca-certificates/ndr-internal-ca.crt
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+
+- name: Update system CA trust store
+  ansible.builtin.command: update-ca-certificates
+  register: ca_update
+  changed_when: 'ca_update.stdout is not search("0 added, 0 removed")'
+  become: true

@@ -1,0 +1,146 @@
+name: "NDR - Possible Nmap Port Scan"
+type: cardinality
+
+index: ndr-sessions-*
+timestamp_field: "@timestamp"
+
+# Enrich the match before sending the alert.
+match_enhancements:
+  - enhancements.ndr_portscan_enricher.NdrPortScanEnricher
+
+# Enrichment settings used by the Python script.
+ndr_enrich_index: ndr-sessions-*
+ndr_enrich_before_minutes: 5
+ndr_enrich_after_seconds: 180
+ndr_enrich_max_ports: 1000
+
+# ndr-sessions-* is derived from zeek-logs*, so give sessionizer time.
+query_delay:
+  minutes: 3
+
+timeframe:
+  minutes: 5
+
+# Group scan behavior by attacker and target host.
+query_key:
+  - source.ip
+  - destination.ip
+
+# Trigger when the same source scans more than 20 unique ports on the same destination.
+cardinality_field: destination.port
+max_cardinality: 20
+
+# For testing you can lower this to 1 minute.
+# For production, 5-15 minutes is fine.
+realert:
+  minutes: 1
+
+# Optional: useful in debug/log alerts.
+top_count_keys:
+  - destination.port
+  - conn.state
+  - network.protocol
+top_count_number: 10
+raw_count_keys: false
+
+filter:
+  - bool:
+      filter:
+        - exists:
+            field: source.ip
+        - exists:
+            field: destination.ip
+        - exists:
+            field: destination.port
+        - term:
+            network.transport: "tcp"
+      should:
+        - term:
+            conn.state: "REJ"
+        - term:
+            conn.state: "RSTO"
+        - term:
+            conn.state: "S0"
+        - term:
+            conn.state: "RSTR"
+        - term:
+            conn.state: "OTH"
+      minimum_should_match: 1
+
+alert:
+  - debug
+  - indexer
+
+indexer_config: /opt/elastalert/config.yaml
+
+indexer_alert_config:
+  rule_name: name
+  alert_type: "nmap_port_scan"
+  severity: "medium"
+
+  source_ip: source.ip
+  destination_ip: destination.ip
+  destination_port_sample: destination.port
+
+  network_direction: network.direction
+  network_scope: network.scope
+  protocol: network.protocol
+  transport: network.transport
+  conn_state_sample: conn.state
+
+  session_id: session.id
+  session_uid: session.uid
+  sensor: sensor.name
+  event_time: "@timestamp"
+
+  message: ndr_scan_message
+  scan_unique_destination_ports: ndr_scan_unique_destination_ports
+  scan_interesting_ports: ndr_scan_interesting_ports
+  scan_conn_state_summary: ndr_scan_conn_state_summary
+  scan_protocol_summary: ndr_scan_protocol_summary
+  scan_ports_sample: ndr_scan_ports_sample
+  scan_window_start: ndr_scan_window_start
+  scan_window_end: ndr_scan_window_end
+
+
+  customFields:
+    - name: mitre_tactic
+      value: "Discovery"
+    - name: mitre_technique
+      value: "Network Service Discovery"
+    - name: mitre_id
+      value: "T1046"
+    - name: detection_logic
+      value: "cardinality(destination.port) > 20 grouped by source.ip + destination.ip over 5 minutes"
+    - name: expected_scan_pattern
+      value: "many TCP conn-only sessions, mostly REJ/RSTO, network.protocol often unknown"
+
+alert_subject: "NDR possible Nmap port scan: {0} -> {1}"
+alert_subject_args:
+  - source.ip
+  - destination.ip
+
+alert_text_type: alert_text_jinja
+alert_text: |
+  {{ ndr_scan_message | default("Possible Nmap / TCP port scanning activity detected.") }}
+
+  Source IP: {{ source.ip }}
+  Destination IP: {{ destination.ip }}
+  Sample destination port: {{ destination.port }}
+  Sample conn state: {{ conn.state }}
+  Transport: {{ network.transport }}
+  Protocol: {{ network.protocol }}
+  Network direction: {{ network.direction }}
+  Network scope: {{ network.scope }}
+  Sensor: {{ sensor.name }}
+  Session ID: {{ session.id }}
+
+  Enriched scan context:
+  Unique destination ports: {{ ndr_scan_unique_destination_ports | default("unknown") }}
+  Interesting/open ports: {{ ndr_scan_interesting_ports | default("unknown") }}
+  Conn state summary: {{ ndr_scan_conn_state_summary | default("unknown") }}
+  Protocol summary: {{ ndr_scan_protocol_summary | default("unknown") }}
+  Scan window: {{ ndr_scan_window_start | default("unknown") }} -> {{ ndr_scan_window_end | default("unknown") }}
+
+  MITRE ATT&CK:
+  T1046 - Network Service Discovery

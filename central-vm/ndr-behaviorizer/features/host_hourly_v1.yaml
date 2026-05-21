@@ -1,0 +1,70 @@
+feature_set: host_hourly_v1
+behavior_type: host_hourly
+entity: source.ip
+window: 1h
+window_seconds: 3600
+filters:
+  include:
+    session.flow_based: true
+  exclude:
+    session.excluded_from_behavior: true
+    session.category:
+      - control_plane
+      - malformed_raw
+    session.noise_reasons:
+      - control_plane
+      - dhcp
+      - ntp
+thresholds:
+  dns_long_query_length: 80
+vector_order:
+  - session_count
+  - unique_destination_ip_count
+  - unique_destination_port_count
+  - unique_protocol_count
+  - network_bytes_sum
+  - network_packets_sum
+  - avg_session_duration
+  - max_session_duration
+  - external_destination_count
+  - internal_destination_count
+  - inbound_count
+  - outbound_count
+  - internal_count
+  - dns_session_count
+  - dns_unique_query_count
+  - dns_nxdomain_count
+  - dns_nxdomain_ratio
+  - dns_txt_count
+  - dns_long_query_count
+  - dns_max_query_length
+  - dns_avg_query_length
+  - dns_max_label_length
+  - dns_avg_label_count
+  - http_session_count
+  - http_unique_host_count
+  - http_unique_user_agent_count
+  - http_error_4xx_count
+  - http_error_5xx_count
+  - http_response_body_bytes_sum
+  - http_download_count
+  - files_count
+  - files_total_bytes_sum
+  - files_unique_mime_type_count
+  - files_hash_count
+  - tls_session_count
+  - tls_unique_sni_count
+  - tls_invalid_cert_count
+  - tls_sni_mismatch_count
+  - tls_self_signed_count
+  - tls_expired_cert_count
+  - tls_unique_issuer_count
+  - tls_unique_subject_count
+  - tls_resumed_count
+  - ssh_session_count
+  - ssh_external_session_count
+  - ssh_nonstandard_port_count
+  - ssh_auth_success_count
+  - ssh_auth_attempt_sum
+  - notice_count
+  - weird_count

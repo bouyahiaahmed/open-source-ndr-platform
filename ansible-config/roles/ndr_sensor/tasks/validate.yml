@@ -1,0 +1,124 @@
+---
+- name: Create temp dir for VRL unit test
+  ansible.builtin.file:
+    path: /tmp/vector-vrl-test
+    state: directory
+    mode: "0755"
+  changed_when: false
+
+- name: Write VRL unit test input.json
+  ansible.builtin.copy:
+    dest: /tmp/vector-vrl-test/input.json
+    mode: "0644"
+    content: |
+      {"file":"/var/log/zeek/conn.log","message":"{\"id.orig_h\":\"192.168.1.1\",\"proto\":\"tcp\"}"}
+  changed_when: false
+
+- name: Write VRL unit test program.vrl
+  ansible.builtin.copy:
+    dest: /tmp/vector-vrl-test/program.vrl
+    mode: "0644"
+    content: |
+      path = ""
+
+      if exists(.file) {
+        path = string(.file) ?? ""
+      }
+
+      obj, err = parse_json(.message)
+
+      if err == null {
+        . = obj
+
+        if path != "" {
+          parts = split(path, "/")
+          filename = parts[-1]
+          base = downcase(string(filename) ?? "")
+          .log_type = replace(base, r'\.(log|json)$', "")
+          .log_file = path
+        }
+      }
+
+      .sensor = "test-sensor"
+  changed_when: false
+
+- name: Run VRL unit test
+  ansible.builtin.command: >
+    /usr/bin/vector vrl
+    --input /tmp/vector-vrl-test/input.json
+    --program /tmp/vector-vrl-test/program.vrl
+    --print-object
+  register: vrl_unit_test
+  changed_when: false
+
+- name: Show VRL unit test output
+  ansible.builtin.debug:
+    var: vrl_unit_test.stdout
+
+- name: Fail if VRL unit test output is not as expected
+  ansible.builtin.fail:
+    msg: >-
+      VRL unit test failed or produced unexpected output.
+      stdout={{ vrl_unit_test.stdout }}
+  when: >
+    (vrl_unit_test.rc != 0) or
+    ('"log_type": "conn"' not in vrl_unit_test.stdout) or
+    ('"log_file": "/var/log/zeek/conn.log"' not in vrl_unit_test.stdout) or
+    ('"sensor": "test-sensor"' not in vrl_unit_test.stdout)
+
+- name: Validate vector config
+  ansible.builtin.command: /usr/bin/vector validate {{ vector_config_path }}
+  register: vector_validate
+  changed_when: false
+
+- name: Show vector validate output (on failure)
+  ansible.builtin.debug:
+    var: vector_validate.stdout
+  when: vector_validate.rc != 0
+
+- name: Fail if vector config is invalid
+  ansible.builtin.fail:
+    msg: "Vector config validation failed (rc={{ vector_validate.rc }}). See stdout above."
+  when: vector_validate.rc != 0
+
+# Wait for vector to be fully active before doing TLS check.
+# On first run it takes a few seconds to start after systemd enable.
+- name: Wait for vector service to be active
+  ansible.builtin.command: systemctl is-active {{ vector_service_name }}
+  register: vector_active_wait
+  retries: 10
+  delay: 3
+  until: vector_active_wait.stdout.strip() == "active"
+  changed_when: false
+  failed_when: false
+
+- name: Fail if vector never became active
+  ansible.builtin.fail:
+    msg: "Vector service did not reach 'active' state after 30s."
+  when: vector_active_wait.stdout.strip() != "active"
+
+# TLS check with retry — data prepper may still be finishing its TLS handshake
+# setup on first run, or the /etc/hosts alias may take a moment to resolve.
+- name: Validate TLS to dataprepper using internal CA
+  ansible.builtin.shell: |
+    echo "" | openssl s_client \
+      -connect {{ dataprepper_host_alias }}:{{ dataprepper_port }} \
+      -servername {{ dataprepper_host_alias }} \
+      -CAfile /usr/local/share/ca-certificates/ndr-internal-ca.crt \
+      -verify_return_error 2>&1
+  register: tls_check
+  retries: 5
+  delay: 5
+  until: tls_check.rc == 0
+  changed_when: false
+
+- name: Verify Python websockets module
+  command: python3 -c "import websockets"
+  register: websocket_check
+  changed_when: false
+
+- name: Cleanup VRL unit test files
+  ansible.builtin.file:
+    path: /tmp/vector-vrl-test
+    state: absent
+  changed_when: false

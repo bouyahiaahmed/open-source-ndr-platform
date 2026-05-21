@@ -1,0 +1,10 @@
+services:
+  ssh-bruteforce-demo:
+    build: .
+    container_name: ndr-ssh-bruteforce-demo
+    network_mode: "host"
+    env_file:
+      - .env
+    volumes:
+      - ./results:/results
+    restart: "no"

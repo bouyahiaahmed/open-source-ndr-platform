@@ -1,0 +1,14 @@
+{
+  "@timestamp": "2026-05-05T14:44:40.000Z",
+  "log_type": "new_future_protocol",
+  "sensor": "sensor1",
+  "uid": "Cunknown123",
+  "community_id": "1:unknowncommunity",
+  "id.orig_h": "192.168.25.129",
+  "id.resp_h": "192.168.25.130",
+  "future_dynamic_field": "kept in disabled zeek object",
+  "nested_future": {
+    "a": 1,
+    "b": true
+  }
+}

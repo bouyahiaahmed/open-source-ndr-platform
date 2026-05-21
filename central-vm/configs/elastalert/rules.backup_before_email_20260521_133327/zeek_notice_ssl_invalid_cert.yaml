@@ -1,0 +1,74 @@
+name: "NDR - Zeek SSL Invalid Certificate"
+type: any
+
+index: "zeek-logs*"
+timestamp_field: "@timestamp"
+timestamp_type: "iso"
+
+filter:
+  - term:
+      log_type.keyword: "notice"
+  - term:
+      note.keyword: "SSL::Invalid_Server_Cert"
+
+realert:
+  minutes: 10
+
+include:
+  - "@timestamp"
+  - "sensor"
+  - "sensor.name"
+  - "log_type"
+  - "uid"
+  - "community_id"
+  - "note"
+  - "msg"
+  - "src"
+  - "dst"
+  - "p"
+  - "proto"
+  - "id.orig_h"
+  - "id.orig_p"
+  - "id.resp_h"
+  - "id.resp_p"
+  - "sub"
+  - "suppress_for"
+
+alert:
+  - debug
+  - indexer
+
+indexer_config: /opt/elastalert/config.yaml
+
+indexer_alert_config:
+  "@timestamp": "@timestamp"
+  zeek.uid: uid
+  zeek.community_id: community_id
+  zeek.note: note
+  zeek.msg: msg
+  zeek.log_type: log_type
+  source.ip: src
+  destination.ip: dst
+  destination.port: p
+  network.transport: proto
+  zeek.sub: sub
+  sensor.name: sensor
+  customFields:
+    - name: alert.name
+      value: "NDR - Invalid TLS Certificate"
+    - name: alert.severity
+      value: "medium"
+    - name: alert.category
+      value: "tls"
+    - name: alert.use_case
+      value: "tls_certificate_validation"
+    - name: alert.engine
+      value: "elastalert2"
+    - name: alert.status
+      value: "open"
+    - name: investigation.index
+      value: "zeek-logs*"
+    - name: investigation.uid
+      value: uid
+    - name: investigation.community_id
+      value: community_id

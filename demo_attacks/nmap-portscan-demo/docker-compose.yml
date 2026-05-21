@@ -1,0 +1,10 @@
+services:
+  nmap-portscan-demo:
+    build: .
+    container_name: ndr-nmap-portscan-demo
+    network_mode: "host"
+    env_file:
+      - .env
+    volumes:
+      - ./results:/results
+    restart: "no"

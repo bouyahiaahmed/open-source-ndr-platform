@@ -1,0 +1,171 @@
+{
+  "index_patterns": [
+    "ndr-findings-*"
+  ],
+  "template": {
+    "settings": {
+      "index": {
+        "number_of_shards": 1,
+        "number_of_replicas": 0,
+        "refresh_interval": "10s"
+      }
+    },
+    "mappings": {
+      "dynamic": false,
+      "properties": {
+        "@timestamp": {
+          "type": "date"
+        },
+        "finding": {
+          "properties": {
+            "type": {
+              "type": "keyword"
+            },
+            "severity": {
+              "type": "keyword"
+            },
+            "confidence": {
+              "type": "double"
+            },
+            "status": {
+              "type": "keyword"
+            },
+            "dedup_id": {
+              "type": "keyword"
+            },
+            "created_at": {
+              "type": "date"
+            }
+          }
+        },
+        "behavior": {
+          "properties": {
+            "id": {
+              "type": "keyword"
+            },
+            "entity": {
+              "type": "keyword"
+            },
+            "sensor": {
+              "type": "keyword"
+            },
+            "window_start": {
+              "type": "date"
+            },
+            "window_end": {
+              "type": "date"
+            },
+            "feature_set": {
+              "type": "keyword"
+            }
+          }
+        },
+        "score": {
+          "properties": {
+            "ml": {
+              "type": "double"
+            },
+            "statistical": {
+              "type": "double"
+            },
+            "final": {
+              "type": "double"
+            }
+          }
+        },
+        "reasons": {
+          "type": "keyword"
+        },
+        "evidence": {
+          "properties": {
+            "behavior_index": {
+              "type": "keyword"
+            },
+            "behavior_id": {
+              "type": "keyword"
+            },
+            "session_ref_count": {
+              "type": "long"
+            },
+            "session_refs_truncated": {
+              "type": "boolean"
+            },
+            "session_refs": {
+              "type": "nested",
+              "properties": {
+                "index": {
+                  "type": "keyword"
+                },
+                "id": {
+                  "type": "keyword"
+                },
+                "uid": {
+                  "type": "keyword"
+                },
+                "community_id": {
+                  "type": "keyword"
+                },
+                "timestamp": {
+                  "type": "date"
+                },
+                "log_types": {
+                  "type": "keyword"
+                },
+                "source_ip": {
+                  "type": "ip"
+                },
+                "destination_ip": {
+                  "type": "ip"
+                },
+                "destination_port": {
+                  "type": "integer"
+                },
+                "session_id": {
+                  "type": "keyword"
+                }
+              }
+            }
+          }
+        },
+        "ml": {
+          "properties": {
+            "top_features": {
+              "type": "nested",
+              "properties": {
+                "name": {
+                  "type": "keyword"
+                },
+                "value": {
+                  "type": "double"
+                },
+                "baseline": {
+                  "type": "double"
+                },
+                "deviation": {
+                  "type": "double"
+                }
+              }
+            },
+            "is_anomaly": {
+              "type": "boolean"
+            },
+            "anomaly_score": {
+              "type": "double"
+            },
+            "model_name": {
+              "type": "keyword"
+            },
+            "model_version": {
+              "type": "keyword"
+            }
+          }
+        }
+      }
+    }
+  },
+  "priority": 250,
+  "_meta": {
+    "component": "ndr-behaviorizer",
+    "version": "0.2.0"
+  }
+}

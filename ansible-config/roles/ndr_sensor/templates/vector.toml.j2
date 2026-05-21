@@ -1,0 +1,374 @@
+{% set sensor_ip = ansible_default_ipv4.address %}
+{% set dp_ip = central_dataprepper_ip %}
+{% set dp_port = dataprepper_port %}
+
+{% set walinuxagent_host_ip = ndr_walinuxagent_host_ip | default(sensor_ip) %}
+{% set eth1_noise_ip = ndr_eth1_noise_ip | default('10.51.1.13') %}
+{% set azure_23456_noise_ips = ndr_azure_23456_noise_ips | default(['40.119.104.0', '40.119.108.0', '40.87.188.0']) %}
+
+{% set package_noise_domains = ndr_package_noise_domains | default([
+  'azure.deb-backend.debian.cloud',
+  'azure.deb.debian.cloud',
+  'download.opensuse.org',
+  'download.docker.com',
+  'packages.microsoft.com',
+  'artifacts.elastic.co'
+]) %}
+
+{% set package_noise_user_agents = ndr_package_noise_user_agents | default([
+  'apt-http',
+  'apt ',
+  'libwww-perl',
+  'python-urllib'
+]) %}
+
+data_dir = "{{ vector_data_dir }}"
+
+[api]
+enabled = true
+address = "127.0.0.1:8686"
+
+[sources.internal_metrics]
+type = "internal_metrics"
+
+[sinks.prom_metrics]
+type = "prometheus_exporter"
+inputs = ["internal_metrics"]
+address = "0.0.0.0:9598"
+
+# ─────────────────────────────────────────────
+# Zeek file source
+# IMPORTANT:
+# Do not use "{{ zeek_logs_dir }}/*.log" blindly.
+# It can ingest conn-summary.*, stats, telemetry, stdout/stderr, etc.
+# ─────────────────────────────────────────────
+[sources.zeek_raw]
+type = "file"
+
+include = [
+  # Core network logs
+  "{{ zeek_logs_dir }}/conn.log",
+  "{{ zeek_logs_dir }}/dns.log",
+  "{{ zeek_logs_dir }}/http.log",
+  "{{ zeek_logs_dir }}/ssl.log",
+  "{{ zeek_logs_dir }}/x509.log",
+  "{{ zeek_logs_dir }}/files.log",
+
+  # Protocol/application logs
+  "{{ zeek_logs_dir }}/ftp.log",
+  "{{ zeek_logs_dir }}/smtp.log",
+  "{{ zeek_logs_dir }}/ssh.log",
+  "{{ zeek_logs_dir }}/irc.log",
+  "{{ zeek_logs_dir }}/ldap.log",
+  "{{ zeek_logs_dir }}/ldap_search.log",
+  "{{ zeek_logs_dir }}/postgresql.log",
+  "{{ zeek_logs_dir }}/quic.log",
+  "{{ zeek_logs_dir }}/rdp.log",
+  "{{ zeek_logs_dir }}/dhcp.log",
+  "{{ zeek_logs_dir }}/ntp.log",
+
+  # SMB / Windows / enterprise protocol logs
+  "{{ zeek_logs_dir }}/smb_files.log",
+  "{{ zeek_logs_dir }}/smb_mapping.log",
+  "{{ zeek_logs_dir }}/dce_rpc.log",
+  "{{ zeek_logs_dir }}/kerberos.log",
+  "{{ zeek_logs_dir }}/ntlm.log",
+
+  # File / binary / tunneling / routing / detection
+  "{{ zeek_logs_dir }}/pe.log",
+  "{{ zeek_logs_dir }}/tunnel.log",
+  "{{ zeek_logs_dir }}/traceroute.log",
+  "{{ zeek_logs_dir }}/weird.log",
+  "{{ zeek_logs_dir }}/notice.log",
+  "{{ zeek_logs_dir }}/analyzer.log",
+
+  # Asset / software intelligence
+  "{{ zeek_logs_dir }}/known_hosts.log",
+  "{{ zeek_logs_dir }}/known_services.log",
+  "{{ zeek_logs_dir }}/known_certs.log",
+  "{{ zeek_logs_dir }}/software.log"
+]
+
+exclude = [
+  "{{ zeek_logs_dir }}/conn-summary*.log",
+  "{{ zeek_logs_dir }}/stdout.log",
+  "{{ zeek_logs_dir }}/stderr.log",
+  "{{ zeek_logs_dir }}/reporter.log",
+  "{{ zeek_logs_dir }}/capture_loss.log",
+  "{{ zeek_logs_dir }}/stats.log",
+  "{{ zeek_logs_dir }}/telemetry.log",
+  "{{ zeek_logs_dir }}/loaded_scripts.log",
+  "{{ zeek_logs_dir }}/packet_filter.log"
+]
+
+file_key = "file"
+read_from = "beginning"
+ignore_older_secs = 0
+fingerprint.strategy = "device_and_inode"
+glob_minimum_cooldown_ms = 1000
+line_delimiter = "\n"
+
+# Debug/safety for partial line issues
+offset_key = "file_offset"
+max_line_bytes = 1048576
+
+[transforms.zeek_parse_json]
+type = "remap"
+inputs = ["zeek_raw"]
+drop_on_error = false
+source = '''
+# ─────────────────────────────────────────────
+# 1. Preserve Vector metadata before overwrite
+# ─────────────────────────────────────────────
+file_path = string(.file) ?? ""
+file_offset = .file_offset
+raw_message = string(.message) ?? ""
+
+# ─────────────────────────────────────────────
+# 2. Parse JSON safely
+# ─────────────────────────────────────────────
+parsed, err = parse_json(raw_message)
+
+if err == null {
+  . = parsed
+  .vector_parse_error = false
+} else {
+  .vector_parse_error = true
+  .vector_parse_error_stage = "zeek_parse_json"
+  .vector_parse_error_reason = to_string(err)
+  .raw_message = raw_message
+}
+
+.file_offset = file_offset
+
+# ─────────────────────────────────────────────
+# 3. Restore metadata
+# ─────────────────────────────────────────────
+if file_path != "" {
+  .file = file_path
+}
+
+# ─────────────────────────────────────────────
+# 4. Handle Zeek timestamp
+# ─────────────────────────────────────────────
+if exists(.ts) {
+  ts_float, err = to_float(.ts)
+
+  if err == null {
+    ts_ms = to_int(ts_float * 1000)
+    .@timestamp = from_unix_timestamp!(ts_ms, unit: "milliseconds")
+  }
+
+  del(.ts)
+}
+
+# ─────────────────────────────────────────────
+# 5. Fallback timestamp
+# ─────────────────────────────────────────────
+if !exists(.@timestamp) {
+  .@timestamp = now()
+}
+
+# Fix fields that caused type conflicts downstream
+.rcode = to_string(.rcode) ?? .rcode
+.opcode = to_string(.opcode) ?? .opcode
+
+# ─────────────────────────────────────────────
+# 6. Derive log_type from file name
+# ─────────────────────────────────────────────
+path = string(.file) ?? ""
+
+if path != "" {
+  parts = split(path, "/")
+  filename = parts[-1]
+
+  base = downcase(string(filename) ?? "")
+  stripped = replace(base, r'\.(log|json)$', "")
+
+  .log_type = replace(
+    stripped,
+    r'\.[0-9]{4}-[0-9]{2}-[0-9]{2}(-[0-9]{2}){3}$',
+    ""
+  )
+
+  .log_file = path
+}
+
+# ─────────────────────────────────────────────
+# 7. Add ingestion metadata
+# ─────────────────────────────────────────────
+.ingest_time_vt = now()
+.sensor = "{{ inventory_hostname }}"
+'''
+
+
+[transforms.zeek_route_parse]
+type = "route"
+inputs = ["zeek_parse_json"]
+
+  [transforms.zeek_route_parse.route]
+  valid = '.vector_parse_error != true'
+  parse_error = '.vector_parse_error == true'
+
+# ─────────────────────────────────────────────
+# Minimal junk/system filter
+# Keep useful NDR logs such as:
+# known_hosts, known_services, known_certs, software,
+# ntp, ldap_search, postgresql, etc.
+# ─────────────────────────────────────────────
+[transforms.zeek_filter]
+type = "filter"
+inputs = ["zeek_route_parse.valid"]
+condition = '!(starts_with(to_string(.log_type) ?? "", "conn-summary") || includes(["stdout", "stderr", "packet_filter", "telemetry", "stats", "reporter", "capture_loss", "loaded_scripts"], to_string(.log_type) ?? ""))'
+
+# ─────────────────────────────────────────────
+# Drop Azure platform / metadata noise
+# ─────────────────────────────────────────────
+[transforms.zeek_drop_azure_ips]
+type = "filter"
+inputs = ["zeek_filter"]
+condition = '!(((to_string(."id.resp_h") ?? "") == "168.63.129.16") || ((to_string(."id.orig_h") ?? "") == "168.63.129.16") || ((to_string(."id.resp_h") ?? "") == "169.254.169.254") || ((to_string(."id.orig_h") ?? "") == "169.254.169.254"))'
+
+# ─────────────────────────────────────────────
+# Drop Vector -> Data Prepper self-pipeline traffic
+# Uses exact sensor IP, Data Prepper IP, and Data Prepper port.
+# ─────────────────────────────────────────────
+[transforms.zeek_drop_pipeline]
+type = "filter"
+inputs = ["zeek_drop_azure_ips"]
+condition = '!(((to_string(."id.orig_h") ?? "") == "{{ sensor_ip }}") && ((to_string(."id.resp_h") ?? "") == "{{ dp_ip }}") && ((."id.resp_p" == {{ dp_port }}) || ((to_string(."id.resp_p") ?? "") == "{{ dp_port }}")))'
+
+# ─────────────────────────────────────────────
+# Drop broadcast / multicast noise
+# ─────────────────────────────────────────────
+[transforms.zeek_drop_broadcast]
+type = "filter"
+inputs = ["zeek_drop_pipeline"]
+condition = '!(((to_string(."id.resp_h") ?? "") == "10.51.1.255") || ((to_string(."id.orig_h") ?? "") == "10.51.1.255") || ((to_string(."id.resp_h") ?? "") == "ff02::1") || ((to_string(."id.orig_h") ?? "") == "ff02::1") || ((to_string(."id.resp_h") ?? "") == "ff02::2") || ((to_string(."id.orig_h") ?? "") == "ff02::2"))'
+
+# ─────────────────────────────────────────────
+# Drop Azure Linux Agent software noise
+# This removes repeated WALinuxAgent software.log entries from this sensor.
+# ─────────────────────────────────────────────
+[transforms.zeek_drop_walinuxagent_software]
+type = "filter"
+inputs = ["zeek_drop_broadcast"]
+condition = '!(((to_string(.log_type) ?? "") == "software") && ((to_string(.name) ?? "") == "WALinuxAgent") && ((to_string(.host) ?? "") == "{{ walinuxagent_host_ip }}"))'
+
+# ─────────────────────────────────────────────
+# Drop eth1/Azure reset noise on port 23456
+# Observed as partial/asymmetric conn.log noise:
+# eth1 IP -> Azure fabric-ish IPs, port 23456, conn_state=OTH, history=R
+# ─────────────────────────────────────────────
+[transforms.zeek_drop_eth1_azure_23456_noise]
+type = "filter"
+inputs = ["zeek_drop_walinuxagent_software"]
+condition = '!(((to_string(."id.orig_h") ?? "") == "{{ eth1_noise_ip }}") && includes([{% for ip in azure_23456_noise_ips %}"{{ ip }}"{% if not loop.last %}, {% endif %}{% endfor %}], to_string(."id.resp_h") ?? "") && ((."id.resp_p" == 23456) || ((to_string(."id.resp_p") ?? "") == "23456")) && ((to_string(.conn_state) ?? "") == "OTH") && ((to_string(.history) ?? "") == "R"))'
+
+
+# ─────────────────────────────────────────────
+# Mark package/update traffic as noise, do not drop it.
+# Useful for dashboards and later ML down-weighting.
+# ─────────────────────────────────────────────
+[transforms.zeek_mark_pkg_noise]
+type = "remap"
+inputs = ["zeek_drop_eth1_azure_23456_noise"]
+source = '''
+q = downcase(to_string(.query) ?? "")
+h = downcase(to_string(.host) ?? "")
+ua = downcase(to_string(."user_agent.name") ?? to_string(.user_agent) ?? "")
+name = downcase(to_string(.name) ?? "")
+
+pkg_domain_hit = false
+pkg_ua_hit = false
+
+{% for domain in package_noise_domains %}
+if contains(q, "{{ domain }}") || contains(h, "{{ domain }}") {
+  pkg_domain_hit = true
+}
+{% endfor %}
+
+{% for ua_pattern in package_noise_user_agents %}
+if contains(ua, "{{ ua_pattern }}") || contains(name, "{{ ua_pattern }}") {
+  pkg_ua_hit = true
+}
+{% endfor %}
+
+if pkg_domain_hit || pkg_ua_hit {
+  .ndr_noise = true
+  .ndr_noise_type = "package_update"
+  .ndr_noise_reason = "known package manager or repository traffic"
+} else {
+  .ndr_noise = false
+}
+'''
+
+# ─────────────────────────────────────────────
+# Disabled filters below.
+# Keep them commented until the 2-hour baseline confirms stable data.
+# ─────────────────────────────────────────────
+
+#[transforms.zeek_drop_telemetry]
+#type = "filter"
+#inputs = ["zeek_drop_broadcast"]
+#condition = '!contains(to_string(.log_type) ?? "", "telemetry")'
+
+#[transforms.zeek_drop_dns_noise]
+#type = "filter"
+#inputs = ["zeek_drop_broadcast"]
+#condition = '!(((to_string(.log_type) ?? "") == "dns") && (contains(downcase(to_string(.query) ?? ""), "254.169.254.169.in-addr.arpa") || contains(downcase(to_string(.query) ?? ""), "16.129.63.168.in-addr.arpa") || contains(downcase(to_string(.query) ?? ""), "amatest.net") || contains(downcase(to_string(.query) ?? ""), "azure.deb-backend.debian.cloud") || contains(downcase(to_string(.query) ?? ""), "download.opensuse.org") || contains(downcase(to_string(.query) ?? ""), "download.docker.com") || contains(downcase(to_string(.query) ?? ""), "packages.microsoft.com") || contains(downcase(to_string(.query) ?? ""), "artifacts.elastic.co")))'
+
+#[transforms.zeek_drop_pkg_http]
+#type = "filter"
+#inputs = ["zeek_drop_broadcast"]
+#condition = '!(((to_string(.log_type) ?? "") == "http") && (contains(downcase(to_string(.host) ?? ""), "azure.deb") || contains(downcase(to_string(.host) ?? ""), "download.opensuse.org") || contains(downcase(to_string(.host) ?? ""), "download.docker.com") || contains(downcase(to_string(.host) ?? ""), "packages.microsoft.com") || contains(downcase(to_string(.host) ?? ""), "artifacts.elastic.co") || contains(downcase(to_string(."user_agent.name") ?? to_string(.user_agent) ?? ""), "apt-http") || contains(downcase(to_string(."user_agent.name") ?? to_string(.user_agent) ?? ""), "apt ") || contains(downcase(to_string(."user_agent.name") ?? to_string(.user_agent) ?? ""), "libwww-perl")))'
+
+#[transforms.zeek_drop_smtp_noise]
+#type = "filter"
+#inputs = ["zeek_drop_broadcast"]
+#condition = '!(((to_string(.log_type) ?? "") == "conn") && ((to_string(."id.resp_p") ?? "") == "25") && ((to_string(.conn_state) ?? "") == "S0"))'
+
+#[transforms.zeek_drop_ntp_noise]
+#type = "filter"
+#inputs = ["zeek_drop_broadcast"]
+#condition = '!((to_string(."id.resp_p") ?? "") == "123")'
+
+
+[sinks.zeek_parse_errors_file]
+type = "file"
+inputs = ["zeek_route_parse.parse_error"]
+path = "{{ vector_data_dir }}/zeek-parse-errors-%Y-%m-%d.ndjson"
+encoding.codec = "json"
+
+[sinks.dp_ingest]
+type = "http"
+inputs = ["zeek_mark_pkg_noise"]
+
+uri = "https://{{ dataprepper_host_alias }}:{{ dataprepper_port }}{{ dataprepper_ingest_path }}"
+method = "post"
+
+# Send batched events as JSON array
+encoding.codec = "json"
+
+# IMPORTANT: do NOT set framing.method
+request.headers.Content-Type = "application/json"
+
+auth.strategy = "basic"
+auth.user = "{{ dp_basic_user }}"
+auth.password = "{{ dp_basic_pass }}"
+
+tls.verify_certificate = true
+tls.verify_hostname = false
+
+batch.max_events = 200
+batch.timeout_secs = 2
+
+request.timeout_secs = 15
+request.retry_attempts = 10
+request.retry_initial_backoff_secs = 1
+request.retry_max_duration_secs = 120
+request.concurrency = 2
+
+buffer.type = "disk"
+buffer.max_size = 5368709120
+buffer.when_full = "block"

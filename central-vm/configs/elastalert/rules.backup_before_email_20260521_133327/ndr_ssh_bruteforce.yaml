@@ -1,0 +1,89 @@
+name: "NDR - Possible SSH Brute Force"
+type: frequency
+
+index: ndr-sessions-*
+timestamp_field: "@timestamp"
+
+query_delay:
+  minutes: 1
+
+num_events: 8
+timeframe:
+  minutes: 5
+
+query_key:
+  - source.ip
+  - destination.ip
+
+realert:
+  minutes: 10
+
+attach_related: true
+
+filter:
+  - bool:
+      filter:
+        - exists:
+            field: source.ip
+        - exists:
+            field: destination.ip
+        - exists:
+            field: destination.port
+      should:
+        - term:
+            network.protocol: "ssh"
+        - term:
+            destination.port: 22
+        - term:
+            session.has_ssh: true
+      minimum_should_match: 1
+
+alert:
+  - debug
+  - indexer
+
+indexer_config: /opt/elastalert/config.yaml
+
+indexer_alert_config:
+  rule_name: name
+  alert_type: "ssh_bruteforce"
+  severity: "medium"
+  source_ip: source.ip
+  destination_ip: destination.ip
+  destination_port: destination.port
+  network_direction: network.direction
+  network_scope: network.scope
+  session_id: session.id
+  session_uid: session.uid
+  protocol: network.protocol
+  sensor: sensor.name
+  event_time: "@timestamp"
+  customFields:
+    - name: message
+      value: "Possible SSH brute-force activity detected"
+    - name: mitre_tactic
+      value: "Credential Access"
+    - name: mitre_technique
+      value: "Brute Force"
+    - name: mitre_id
+      value: "T1110"
+
+alert_subject: "NDR SSH brute force suspected: {0} -> {1}"
+alert_subject_args:
+  - source.ip
+  - destination.ip
+
+alert_text_type: alert_text_jinja
+alert_text: |
+  SSH brute-force activity suspected.
+
+  Source IP: {{ source.ip }}
+  Destination IP: {{ destination.ip }}
+  Destination port: {{ destination.port }}
+  Sensor: {{ sensor.name }}
+  Network direction: {{ network.direction }}
+  Network scope: {{ network.scope }}
+  Session ID: {{ session.id }}
+
+  Reason:
+  At least 8 SSH sessions from the same source to the same destination were observed within 5 minutes.

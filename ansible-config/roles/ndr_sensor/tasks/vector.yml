@@ -1,0 +1,117 @@
+---
+- name: Ensure vector group exists
+  group:
+    name: "{{ vector_group }}"
+    system: true
+
+- name: Ensure vector user exists
+  user:
+    name: "{{ vector_user }}"
+    group: "{{ vector_group }}"
+    groups: zeek          # add zeek membership here, not in a separate task
+    append: true
+    system: true
+    home: "{{ vector_data_dir }}"
+    shell: /usr/sbin/nologin
+  # Note: zeek group must already exist before this task.
+  # The zeek package creates it. If zeek isn't installed yet, this will fail
+  # on first run — acceptable because zeek.yml runs before vector.yml.
+
+- name: Ensure vector directories exist
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ vector_user }}"
+    group: "{{ vector_group }}"
+    mode: "0755"
+    recurse: true
+  loop:
+    - /etc/vector
+    - "{{ vector_data_dir }}"
+    - "{{ vector_log_dir }}"
+  changed_when: false
+
+
+- name: Check if buffer lock exists
+  stat:
+    path: "{{ vector_data_dir }}/buffer/v2/dp_ingest/buffer.lock"
+  register: buffer_lock
+
+- name: Remove stale vector buffer lock file if present
+  file:
+    path: "{{ vector_data_dir }}/buffer/v2/dp_ingest/buffer.lock"
+    state: absent
+  when: buffer_lock.stat.exists
+  changed_when: false
+
+- name: Check vector version (if installed)
+  command: /usr/bin/vector --version
+  register: vector_ver
+  changed_when: false
+  failed_when: false
+
+- name: Download vector deb
+  get_url:
+    url: "{{ vector_deb_url }}"
+    dest: "{{ vector_deb_tmp }}"
+    mode: "0644"
+  when:
+    - not ansible_check_mode
+    - vector_ver.rc != 0 or (vector_version not in (vector_ver.stdout | default('')))
+
+- name: Install vector package
+  apt:
+    deb: "{{ vector_deb_tmp }}"
+  when:
+    - not ansible_check_mode
+    - vector_ver.rc != 0 or (vector_version not in (vector_ver.stdout | default('')))
+  notify:
+    - systemd daemon reload
+    - restart vector
+
+- name: Render vector config
+  template:
+    src: vector.toml.j2
+    dest: "{{ vector_config_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: vector_config_result
+  notify: restart vector
+
+- name: Show rendered sensor IP
+  debug:
+    msg: "sensor_ip={{ ansible_default_ipv4.address }}"
+
+- name: Render vector systemd unit
+  template:
+    src: vector.service.j2
+    dest: /etc/systemd/system/vector.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - systemd daemon reload
+    - restart vector
+
+- name: Check if vector systemd unit exists
+  stat:
+    path: /etc/systemd/system/vector.service
+  register: vector_unit
+
+- name: Flush vector handlers before health checks
+  meta: flush_handlers
+
+- name: Ensure vector is enabled and running
+  systemd:
+    name: "{{ vector_service_name }}"
+    enabled: true
+    state: started
+
+- name: Ensure Data Prepper hostname resolves locally
+  lineinfile:
+    path: /etc/hosts
+    regexp: '.*\s{{ dataprepper_host_alias }}$'
+    line: "{{ central_dataprepper_ip }} {{ dataprepper_host_alias }}"
+    state: present
+    create: true

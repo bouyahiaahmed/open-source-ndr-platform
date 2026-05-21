@@ -1,0 +1,466 @@
+services:
+  opensearch:
+    image: opensearchproject/opensearch:3.5.0
+    container_name: os-node-1
+    restart: unless-stopped
+
+    environment:
+      cluster.name: ${OPENSEARCH_CLUSTER_NAME:-ndr-central}
+      node.name: ${OPENSEARCH_NODE_NAME:-opensearch-node1}
+      discovery.type: single-node
+
+      OPENSEARCH_JAVA_OPTS: ${OPENSEARCH_JAVA_OPTS:--Xms4g -Xmx4g}
+
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: ${OPENSEARCH_INITIAL_ADMIN_PASSWORD}
+
+      plugins.security.disabled: "false"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+
+      bootstrap.memory_lock: "true"
+
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+
+    volumes:
+      - os-data:/usr/share/opensearch/data
+      - ../configs/opensearch.yml:/usr/share/opensearch/config/opensearch.yml:ro
+      - ../certs:/usr/share/opensearch/config/certs:ro
+
+    ports:
+      - "9200:9200"
+      - "9600:9600"
+
+    networks:
+       backend:
+         aliases:
+          - opensearch-node1
+          - opensearch
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sk https://localhost:9200 >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 40
+
+  dashboards:
+    image: opensearchproject/opensearch-dashboards:3.5.0
+    container_name: ndr-dashboards
+    restart: unless-stopped
+
+    depends_on:
+      opensearch:
+        condition: service_healthy
+
+    environment:
+      OS_DASHBOARDS_USERNAME: ${OS_DASHBOARDS_USERNAME}
+      OS_DASHBOARDS_PASSWORD: ${OS_DASHBOARDS_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sk https://localhost:5601/api/status >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 40
+
+    volumes:
+      - ../configs/dashboards.yml:/usr/share/opensearch-dashboards/config/opensearch_dashboards.yml:ro
+      - ../certs/ca:/usr/share/opensearch-dashboards/config/certs/ca:ro
+      - ../certs/dashboards:/usr/share/opensearch-dashboards/config/certs/dashboards:ro
+
+    ports:
+      - "5601:5601"
+
+    networks:
+      - backend
+
+  dataprepper:
+    image: opensearchproject/data-prepper:2.13.1
+    container_name: ndr-dataprepper
+    restart: unless-stopped
+
+    depends_on:
+      opensearch:
+        condition: service_healthy
+      opensearch-template-init:
+        condition: service_completed_successfully
+
+    environment:
+      OS_INGEST_USERNAME: ${OS_INGEST_USERNAME}
+      OS_INGEST_PASSWORD: ${OS_INGEST_PASSWORD}
+      DP_HTTP_USERNAME: ${DP_HTTP_USERNAME}
+      DP_HTTP_PASSWORD: ${DP_HTTP_PASSWORD}
+      DP_INDEX_PREFIX: ${DP_INDEX_PREFIX:-zeek}
+
+    volumes:
+      - ../configs/dataprepper/data-prepper.yml:/usr/share/data-prepper/config/data-prepper.yml:ro
+      - ../configs/dataprepper/pipelines.yml:/usr/share/data-prepper/pipelines/pipelines.yml:ro
+      - ../certs/ca:/usr/share/data-prepper/certs/ca:ro
+      - ../certs/dataprepper:/usr/share/data-prepper/certs/dataprepper:ro
+
+    ports:
+      - "2021:2021"
+      - "4900:4900"
+
+    networks:
+      - backend
+
+  opensearch-template-init:
+    image: curlimages/curl:8.10.1
+    container_name: opensearch-template-init
+    restart: "no"
+
+    depends_on:
+      opensearch:
+        condition: service_healthy
+
+    environment:
+      OS_URL: "https://opensearch-node1:9200"
+      OS_USER: "${OPENSEARCH_USER:-admin}"
+      OS_PASS: "${OPENSEARCH_PASSWORD:-admin}"
+      CA_CERT: "/certs/ca/ca.crt"
+      TEMPLATE_NAME: "zeek-logs-template-v1"
+      TEMPLATE_FILE: "/templates/zeek-logs-template-v1.json"
+
+    volumes:
+      - ../certs/ca/ca.crt:/certs/ca/ca.crt:ro
+      - ../configs/templates/zeek-logs-template-v1.json:/templates/zeek-logs-template-v1.json:ro
+      - ../scripts/apply-opensearch-templates.sh:/scripts/apply-opensearch-templates.sh:ro
+
+    entrypoint: ["/bin/sh", "/scripts/apply-opensearch-templates.sh"]
+
+    networks:
+      - backend
+
+
+  # zeek-index-pattern-sync:
+  #   build:
+  #     context: ./zeek-index-pattern-sync
+  #   container_name: zeek-index-pattern-sync
+  #   restart: unless-stopped
+  #
+  #   environment:
+  #     OPENSEARCH_URL: "https://opensearch-node1:9200"
+  #     OPENSEARCH_USERNAME: ${OPENSEARCH_USERNAME:-admin}
+  #     OPENSEARCH_PASSWORD: ${OPENSEARCH_PASSWORD:-admin}
+  #
+  #     OPENSEARCH_DASHBOARDS_URL: "https://dashboards:5601"
+  #     OPENSEARCH_DASHBOARDS_USERNAME: ${OS_DASHBOARDS_USERNAME:-admin}
+  #     OPENSEARCH_DASHBOARDS_PASSWORD: ${OS_DASHBOARDS_PASSWORD:-admin}
+  #
+  #     INDEX_PREFIX: "zeek-"
+  #     DASHBOARDS_TENANT: "global"
+  #     POLL_INTERVAL_SECONDS: "60"
+  #     INSECURE_TLS: "true"
+  #
+  #   depends_on:
+  #     opensearch:
+  #       condition: service_healthy
+  #     dashboards:
+  #       condition: service_healthy
+  #
+  #   networks:
+  #     - backend
+
+  # zeek-alias-sync:
+  #   build:
+  #     context: ./zeek-alias-sync
+  #   container_name: zeek-alias-sync
+  #   restart: unless-stopped
+  #
+  #   environment:
+  #     OPENSEARCH_URL: "https://opensearch-node1:9200"
+  #     OPENSEARCH_USERNAME: ${OPENSEARCH_USERNAME:-admin}
+  #     OPENSEARCH_PASSWORD: ${OPENSEARCH_PASSWORD-admin}
+  #
+  #     INITIAL_WAIT_SECONDS: "120"
+  #     MIN_EXPECTED_INDICES: "5"
+  #
+  #     INDEX_PREFIX: "zeek-"
+  #     POLL_INTERVAL_SECONDS: "60"
+  #     INSECURE_TLS: "true"
+  #
+  #   depends_on:
+  #     opensearch:
+  #       condition: service_healthy
+  #
+  #   networks:
+  #     - backend
+
+  ndr-sessionizer-template-init:
+    image: curlimages/curl:8.10.1
+    container_name: ndr-sessionizer-template-init
+    restart: "no"
+
+    depends_on:
+      opensearch:
+        condition: service_healthy
+
+    environment:
+      OPENSEARCH_URL: "https://opensearch-node1:9200"
+      OPENSEARCH_USERNAME: "${NDR_ADMIN_USERNAME:-admin}"
+      OPENSEARCH_PASSWORD: "${NDR_ADMIN_PASSWORD:-admin}"
+      CA_CERT: "/certs/ca/ca.crt"
+
+    volumes:
+      - ../ndr-sessionizer/mappings:/mappings:ro
+      - ../certs/ca/ca.crt:/certs/ca/ca.crt:ro
+
+    command: >
+      sh -c '
+        echo "Waiting for OpenSearch...";
+        until curl --cacert "$$CA_CERT" -s -u "$$OPENSEARCH_USERNAME:$$OPENSEARCH_PASSWORD" "$$OPENSEARCH_URL/_cluster/health" >/dev/null; do
+          echo "OpenSearch not ready yet...";
+          sleep 5;
+        done;
+
+        echo "Applying ndr-sessions template...";
+        curl --cacert "$$CA_CERT" -sS -u "$$OPENSEARCH_USERNAME:$$OPENSEARCH_PASSWORD" \
+          -H "Content-Type: application/json" \
+          -X PUT "$$OPENSEARCH_URL/_index_template/ndr-sessions-template" \
+          --data-binary @/mappings/ndr-sessions-template.json;
+
+        echo "Applying ndr-sessionizer-state template...";
+        curl --cacert "$$CA_CERT" -sS -u "$$OPENSEARCH_USERNAME:$$OPENSEARCH_PASSWORD" \
+          -H "Content-Type: application/json" \
+          -X PUT "$$OPENSEARCH_URL/_index_template/ndr-sessionizer-state-template" \
+          --data-binary @/mappings/ndr-sessionizer-state-template.json;
+
+        echo "NDR sessionizer templates applied.";
+      '
+
+    networks:
+      - backend
+
+  ndr-sessionizer:
+    build:
+      context: ../ndr-sessionizer
+      dockerfile: Dockerfile
+    image: ndr-sessionizer:0.1.0
+    container_name: ndr-sessionizer
+    restart: unless-stopped
+
+    depends_on:
+      ndr-sessionizer-template-init:
+        condition: service_completed_successfully
+
+    environment:
+      OPENSEARCH_URL: "https://opensearch-node1:9200"
+      OPENSEARCH_USERNAME: "${NDR_ADMIN_USERNAME:-admin}"
+      OPENSEARCH_PASSWORD: "${NDR_ADMIN_PASSWORD:-admin}"
+
+      OPENSEARCH_CA_CERT: "/certs/ca/ca.crt"
+      OPENSEARCH_VERIFY_CERTS: "true"
+
+      SOURCE_INDEX_PATTERN: "zeek-logs*"
+      TARGET_INDEX_PREFIX: "ndr-sessions"
+      STATE_INDEX: "ndr-sessionizer-state"
+
+      RUN_ONCE: "false"
+      DRY_RUN: "false"
+      CHECKPOINT_ID: "default"
+
+      POLL_INTERVAL_SECONDS: "30"
+      READ_PAGE_SIZE: "500"
+      BULK_SIZE: "500"
+
+      MAX_EVENTS_PER_LOG_TYPE_PER_SESSION: "20"
+      MAX_EVIDENCE_ITEMS: "100"
+      PRESERVE_RAW_EVENT_FIELDS: "true"
+
+      HTTP_PORT: "8080"
+      # Production hardening
+      PROCESS_TIME_FIELD: "ingest_time_vt"
+      EVENT_TIME_FIELD: "@timestamp"
+
+      # Keep a reconciliation overlap so late Zeek logs update old sessions
+      LOOKBACK_OVERLAP_SECONDS: "1800"
+      INITIAL_LOOKBACK_SECONDS: "259200"
+
+      # Dynamic internal network logic, not static VM IPs
+      INTERNAL_NETWORKS: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+      # Format: spoke:vnet:subnet:cidr;spoke:vnet:subnet:cidr
+      # Edit AZURE_SUBNETS in .env for your real hub/spoke topology.
+      AZURE_SUBNETS: "${AZURE_SUBNETS:-spoke1:amatest-vnet:sensor-subnet:10.51.1.0/24;spoke1:amatest-vnet:services-subnet:10.51.3.0/24}"
+
+      # Dynamic control-plane tagging, not IP filtering
+      CONTROL_PLANE_PORTS: "2021,4900,5601,9200,9300,9598"
+      CONTROL_PLANE_PROTOCOLS: "ntp,dhcp"
+      CONTROL_PLANE_TAG_ONLY: "true"
+
+      # Safer session document semantics
+      DEFAULT_UNKNOWN_PROTOCOL: "unknown"
+      TAG_CONTROL_PLANE: "true"
+
+
+    volumes:
+      - ../certs/ca/ca.crt:/certs/ca/ca.crt:ro
+
+    ports:
+      - "8088:8080"
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/readyz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+    networks:
+      - backend
+
+  ndr-behaviorizer-template-init:
+    image: curlimages/curl:8.10.1
+    container_name: ndr-behaviorizer-template-init
+    restart: "no"
+
+    depends_on:
+      opensearch:
+        condition: service_healthy
+
+    environment:
+      OPENSEARCH_URL: "https://opensearch-node1:9200"
+      OPENSEARCH_USERNAME: "${NDR_ADMIN_USERNAME:-admin}"
+      OPENSEARCH_PASSWORD: "${NDR_ADMIN_PASSWORD:-admin}"
+      CA_CERT: "/certs/ca/ca.crt"
+
+    volumes:
+      - ../ndr-behaviorizer/mappings:/mappings:ro
+      - ../certs/ca/ca.crt:/certs/ca/ca.crt:ro
+
+    command: >
+      sh -c '
+        echo "Waiting for OpenSearch...";
+        until curl --cacert "$$CA_CERT" -s -u "$$OPENSEARCH_USERNAME:$$OPENSEARCH_PASSWORD" "$$OPENSEARCH_URL/_cluster/health" >/dev/null; do
+          echo "OpenSearch not ready yet...";
+          sleep 5;
+        done;
+
+        for item in \
+          "ndr-behaviors-template:/mappings/ndr-behaviors-template.json" \
+          "ndr-behaviorizer-state-template:/mappings/ndr-behaviorizer-state-template.json" \
+          "ndr-ml-models-template:/mappings/ndr-ml-models-template.json" \
+          "ndr-findings-template:/mappings/ndr-findings-template.json"; do
+          name="$${item%%:*}";
+          file="$${item#*:}";
+          echo "Applying $$name from $$file";
+          curl --cacert "$$CA_CERT" -sS -u "$$OPENSEARCH_USERNAME:$$OPENSEARCH_PASSWORD" \
+            -H "Content-Type: application/json" \
+            -X PUT "$$OPENSEARCH_URL/_index_template/$$name" \
+            --data-binary "@$$file";
+          echo;
+        done;
+        echo "NDR behaviorizer templates applied.";
+      '
+
+    networks:
+      - backend
+
+  ndr-behaviorizer:
+    build:
+      context: ../ndr-behaviorizer
+      dockerfile: Dockerfile
+    image: ndr-behaviorizer:0.1.0
+    container_name: ndr-behaviorizer
+    restart: unless-stopped
+
+    depends_on:
+      ndr-behaviorizer-template-init:
+        condition: service_completed_successfully
+      ndr-sessionizer:
+        condition: service_started
+
+    environment:
+      OPENSEARCH_URL: "https://opensearch-node1:9200"
+      OPENSEARCH_USERNAME: "${NDR_ADMIN_USERNAME:-admin}"
+      OPENSEARCH_PASSWORD: "${NDR_ADMIN_PASSWORD:-admin}"
+      OPENSEARCH_CA_CERT: "/certs/ca/ca.crt"
+      OPENSEARCH_VERIFY_CERTS: "true"
+
+      SOURCE_INDEX_PATTERN: "ndr-sessions*"
+      TARGET_INDEX_PREFIX: "ndr-behaviors"
+      STATE_INDEX: "ndr-behaviorizer-state"
+      PROCESS_TIME_FIELD: "sessionizer.updated_at"
+      EVENT_TIME_FIELD: "@timestamp"
+
+      BEHAVIOR_WINDOW_SECONDS: "900"
+      LOOKBACK_OVERLAP_SECONDS: "1800"
+      INITIAL_LOOKBACK_SECONDS: "259200"
+      POLL_INTERVAL_SECONDS: "60"
+      READ_PAGE_SIZE: "500"
+      BULK_SIZE: "500"
+
+      FEATURE_SET: "asset_15m_v1"
+      FEATURE_CONFIG_PATH: "/app/features/asset_15m_v1.yaml"
+      BEHAVIOR_ENTITY_MODE: "asset_sensor"
+
+      RUN_ONCE: "false"
+      DRY_RUN: "false"
+      CHECKPOINT_ID: "default"
+      HTTP_PORT: "8080"
+      SERVICE_VERSION: "0.1.0"
+
+      ML_ENABLED: "true"
+      ML_MIN_TRAINING_ROWS: "20"
+      ML_CONTAMINATION: "0.05"
+      ML_TRAINING_MAX_DOCS: "10000"
+      ML_SCORE_CURRENT_ONLY: "true"
+      ML_MODEL_ARTIFACT_PATH: "/tmp/ndr_behaviorizer_model.pkl"
+      FINDINGS_ENABLED: "true"
+      FINDINGS_INDEX_PREFIX: "ndr-findings"
+
+    volumes:
+      - ../certs/ca/ca.crt:/certs/ca/ca.crt:ro
+
+    ports:
+      - "8091:8080"
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/readyz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+    networks:
+      - backend
+
+
+
+
+  elastalert2:
+    image: jertel/elastalert2:2.29.0
+    container_name: elastalert2
+    restart: unless-stopped
+
+    depends_on:
+      - opensearch
+
+    volumes:
+      - ../configs/elastalert/config.yaml:/opt/elastalert/config.yaml:ro
+      - ../configs/elastalert/rules:/opt/elastalert/rules:ro
+      - ../certs/ca/ca.crt:/opt/elastalert/certs/ca.crt:ro
+      - ../configs/elastalert/enhancements:/opt/elastalert/enhancements:ro
+
+    environment:
+      ES_HOST: opensearch-node1
+      ES_PORT: "9200"
+      ES_USE_SSL: "true"
+      ES_USERNAME: "${NDR_ADMIN_USERNAME}"
+      ES_PASSWORD: "${NDR_ADMIN_PASSWORD}"
+      PYTHONPATH: "/opt/elastalert"
+
+
+    command: ["--verbose"]
+
+    networks:
+      - backend
+
+
+
+volumes:
+  os-data:
+
+networks:
+  backend:
+    driver: bridge

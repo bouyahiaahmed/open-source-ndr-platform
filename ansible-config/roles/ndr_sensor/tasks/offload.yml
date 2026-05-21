@@ -1,0 +1,31 @@
+---
+# Installs ethtool and the NIC offload fix systemd service.
+# The udev rule lives in zeek.yml (persistent across reboots).
+# This service handles the live interface on boot.
+
+- name: Install ethtool
+  become: true
+  apt:
+    name: ethtool
+    state: present
+    update_cache: yes
+
+- name: Deploy NIC offload fix systemd service
+  become: true
+  template:
+    src: zeek-offload-fix.service.j2
+    dest: /etc/systemd/system/zeek-offload-fix.service
+    owner: root
+    group: root
+    mode: "0644"
+  when: offload_disable | bool
+  notify: systemd daemon reload
+
+- name: Enable and start offload fix service
+  become: true
+  systemd:
+    name: zeek-offload-fix
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: offload_disable | bool

@@ -1,0 +1,61 @@
+{
+  "index_patterns": [
+    "ndr-ml-models"
+  ],
+  "template": {
+    "settings": {
+      "index": {
+        "number_of_shards": 1,
+        "number_of_replicas": 0
+      }
+    },
+    "mappings": {
+      "dynamic": false,
+      "properties": {
+        "@timestamp": {
+          "type": "date"
+        },
+        "model": {
+          "properties": {
+            "name": {
+              "type": "keyword"
+            },
+            "version": {
+              "type": "keyword"
+            },
+            "feature_set": {
+              "type": "keyword"
+            },
+            "status": {
+              "type": "keyword"
+            },
+            "training_rows": {
+              "type": "long"
+            },
+            "contamination": {
+              "type": "double"
+            },
+            "artifact_path": {
+              "type": "keyword"
+            },
+            "training_min_quality_score": {
+              "type": "integer"
+            }
+          }
+        },
+        "ml": {
+          "properties": {
+            "feature_names": {
+              "type": "keyword"
+            }
+          }
+        }
+      }
+    }
+  },
+  "priority": 250,
+  "_meta": {
+    "component": "ndr-behaviorizer",
+    "version": "0.2.0"
+  }
+}

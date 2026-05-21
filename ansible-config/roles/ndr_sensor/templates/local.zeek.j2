@@ -1,0 +1,69 @@
+## Managed by Ansible — DO NOT EDIT
+
+
+redef digest_salt = "{{ zeek_digest_salt }}";
+
+@load misc/loaded-scripts
+@load misc/capture-loss
+@load misc/stats
+
+@load frameworks/software/vulnerable
+@load frameworks/software/version-changes
+@load-sigs frameworks/signatures/detect-windows-shells
+
+@load protocols/ftp/software
+@load protocols/smtp/software
+@load protocols/ssh/software
+@load protocols/http/software
+
+@load protocols/dns/detect-external-names
+@load protocols/ftp/detect
+
+@load protocols/conn/known-hosts
+@load protocols/conn/known-services
+@load protocols/ssl/known-certs
+@load protocols/ssl/validate-certs
+
+@load protocols/ssh/geo-data
+@load protocols/ssh/detect-bruteforcing
+@load protocols/ssh/interesting-hostnames
+
+@load protocols/http/detect-sql-injection
+
+@load frameworks/files/hash-all-files
+@load frameworks/files/detect-MHR
+
+@load policy/frameworks/notice/extend-email/hostnames
+@load frameworks/telemetry/log
+
+@load policy/tuning/json-logs
+
+# Your NDR additions
+@load ndr-json-logs
+@load policy/protocols/conn/community-id-logging
+
+# Core protocol support
+@load base/protocols/ssh
+@load base/protocols/ftp
+@load base/protocols/ssl
+@load base/files/x509
+
+#te23
+@load policy/frameworks/notice/community-id
+
+# Local network definition
+redef Site::local_nets = {
+{% for network in zeek_local_networks %}
+    {{ network }},
+{% endfor %}
+};
+
+
+
+# Extra protocol detections
+@load protocols/ssl/weak-keys
+@load protocols/ssl/log-hostcerts-only
+
+# Anomaly / misc detection
+@load policy/misc/detect-traceroute
+

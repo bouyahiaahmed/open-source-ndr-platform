@@ -1,0 +1,36 @@
+name: "NDR - Possible Horizontal Scan"
+type: cardinality
+index: ndr-sessions-*
+
+timestamp_field: "@timestamp"
+
+timeframe:
+  minutes: 5
+
+query_key: source.ip
+cardinality_field: destination.ip
+max_cardinality: 10
+
+realert:
+  minutes: 15
+
+filter:
+  - bool:
+      filter:
+        - term:
+            network.transport: "tcp"
+      should:
+        - term:
+            conn.state: "REJ"
+        - term:
+            conn.state: "S0"
+        - term:
+            conn.state: "OTH"
+      minimum_should_match: 1
+
+alert:
+  - debug
+
+alert_subject: "NDR possible horizontal scan from {0}"
+alert_subject_args:
+  - source.ip

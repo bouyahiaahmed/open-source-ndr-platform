@@ -1,0 +1,13 @@
+{
+  "@timestamp": "2026-05-06T16:20:00Z",
+  "session": {"id": "tls-1", "first_seen": "2026-05-06T16:20:00Z", "last_seen": "2026-05-06T16:20:05Z", "log_types": ["conn", "ssl", "x509", "notice"], "flow_based": true, "excluded_from_behavior": false, "has_tls": true, "has_notice": true},
+  "sessionizer": {"updated_at": "2026-05-06T16:20:04Z"},
+  "sensor": {"name": "sensor1"},
+  "source": {"ip": "192.168.25.129", "port": 53002, "local": true},
+  "destination": {"ip": "1.1.1.1", "port": 443, "local": false},
+  "network": {"protocol": "tls", "protocols": ["tls"], "transport": "tcp", "direction": "outbound", "bytes": 5000, "packets": 18},
+  "conn": {"duration": 3.2, "orig_bytes": 1200, "resp_bytes": 3800, "orig_pkts": 8, "resp_pkts": 10},
+  "tls": {"server_name": "bad.example", "version": "TLSv12", "validation_status": "self signed certificate", "established": true, "resumed": false, "sni_matches_cert": false},
+  "x509": {"subjects": ["CN=bad.example"], "issuers": ["CN=bad.example"], "not_valid_after": ["2020-01-01T00:00:00Z"]},
+  "notice": {"notes": ["SSL::Invalid_Server_Cert"], "messages": ["invalid certificate"]}
+}

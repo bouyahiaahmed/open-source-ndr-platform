@@ -1,0 +1,167 @@
+---
+# =========================
+# ZEEK BINARY DISCOVERY
+# =========================
+
+- name: Ensure Zeek logs directory exists
+  file:
+    path: "{{ zeek_logs_dir }}"
+    state: directory
+    mode: "0755"
+  changed_when: false
+
+# =========================
+# ZEEK SITE POLICY DISCOVERY
+# =========================
+
+- name: Set Zeek site policy path candidates
+  set_fact:
+    zeek_site_candidates:
+      - "/opt/zeek/share/zeek/site"
+      - "/usr/local/zeek/share/zeek/site"
+      - "/usr/share/zeek/site"
+
+- name: Find Zeek site directory
+  stat:
+    path: "{{ item }}"
+  loop: "{{ zeek_site_candidates }}"
+  register: zeek_site_stats
+
+- name: Choose first existing Zeek site directory
+  set_fact:
+    zeek_site_dir: "{{ (zeek_site_stats.results | selectattr('stat.exists') | map(attribute='item') | list | first) | default('') }}"
+
+- name: Fail if Zeek site directory not found
+  fail:
+    msg: "Could not find Zeek site directory. Set zeek_site_dir manually in group_vars."
+  when: zeek_site_dir == ""
+
+# =========================
+# READ PREVIOUS CHECKSUM BEFORE ANY CHANGES
+# This must happen BEFORE deploying templates so we can compare correctly.
+# Kept for visibility/debugging, but runtime no longer depends on it.
+# =========================
+
+- name: Read previous local.zeek checksum (if exists)
+  slurp:
+    src: "{{ zeek_checksum_path }}"
+  register: prev_checksum_raw
+  ignore_errors: true
+
+- name: Set previous checksum
+  set_fact:
+    prev_checksum: "{{ prev_checksum_raw.content | b64decode | trim if prev_checksum_raw is not failed else '' }}"
+
+# =========================
+# DEPLOY ZEEK POLICY FILES
+# =========================
+
+- name: Ensure Zeek JSON logging policy is present
+  copy:
+    dest: "{{ zeek_site_dir }}/ndr-json-logs.zeek"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible: enable JSON output for logs
+      redef LogAscii::use_json = T;
+
+- name: Deploy clean local.zeek from template
+  template:
+    src: local.zeek.j2
+    dest: "{{ zeek_site_dir }}/local.zeek"
+    owner: root
+    group: root
+    mode: "0644"
+
+# =========================
+# COMPUTE NEW CHECKSUM (AFTER DEPLOY)
+# Kept for visibility/debugging, but runtime no longer depends on it.
+# =========================
+
+- name: Capture local.zeek checksum after deploy
+  stat:
+    path: "{{ zeek_site_dir }}/local.zeek"
+    get_checksum: true
+  register: local_zeek_stat
+
+- name: Save new local.zeek checksum
+  copy:
+    content: "{{ local_zeek_stat.stat.checksum }}"
+    dest: "{{ zeek_checksum_path }}"
+    owner: root
+    mode: "0600"
+
+# =========================
+# ZEEK DEPLOY (ALWAYS ENSURE CLEAN STATE)
+# We intentionally run zeekctl deploy every time to guarantee
+# correct runtime state (scripts, logs, capture, etc).
+# =========================
+
+- name: Validate Zeek config before deploy
+  command: "{{ zeekctl_bin }} check"
+  register: zeek_check
+  failed_when: zeek_check.rc != 0
+  changed_when: false
+# =========================
+# FIX ZEEK CURRENT LOG PATH
+# =========================
+
+- name: Check /opt/zeek/logs/current
+  stat:
+    path: /opt/zeek/logs/current
+  register: zeek_logs_current
+
+- name: Remove /opt/zeek/logs/current if it is a directory
+  file:
+    path: /opt/zeek/logs/current
+    state: absent
+  when:
+    - zeek_logs_current.stat.exists
+    - zeek_logs_current.stat.isdir
+
+
+- name: Deploy Zeek (always ensure correct runtime state)
+  command: "{{ zeekctl_bin }} deploy"
+  register: zeek_deploy_result
+  changed_when: true
+  notify: restart vector
+
+- name: Show zeekctl deploy output
+  debug:
+    msg: "{{ zeek_deploy_result.stdout_lines | default([]) }}"
+
+# =========================
+# NIC OFFLOADING FIX (handled entirely in offload.yml — removed duplicate here)
+# =========================
+
+- name: Ensure NIC offloading udev rule
+  copy:
+    dest: /etc/udev/rules.d/99-zeek-offload.rules
+    content: |
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="{{ zeek_interface }}", RUN+="/sbin/ethtool -K {{ zeek_interface }} rx off tx off tso off gso off gro off"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Reload udev rules
+  command: udevadm control --reload
+  changed_when: false
+
+- name: Wait until Zeek is fully running
+  command: "{{ zeekctl_bin }} status"
+  register: zeek_status_wait
+  retries: 5
+  delay: 2
+  until: "'running' in zeek_status_wait.stdout"
+  changed_when: false
+
+- name: Generate traffic for Zeek
+  shell: |
+    curl -s http://example.com || true
+    ping -c 2 8.8.8.8 || true
+
+- name: Wait for conn.log to exist
+  wait_for:
+    path: "{{ zeek_logs_dir }}/conn.log"
+    timeout: 30

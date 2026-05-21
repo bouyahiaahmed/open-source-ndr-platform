@@ -1,0 +1,11 @@
+{
+  "@timestamp": "2026-05-06T16:05:00Z",
+  "session": {"id": "dns-1", "first_seen": "2026-05-06T16:05:00Z", "last_seen": "2026-05-06T16:05:01Z", "log_types": ["conn", "dns"], "flow_based": true, "excluded_from_behavior": false, "has_dns": true},
+  "sessionizer": {"updated_at": "2026-05-06T16:05:04Z"},
+  "sensor": {"name": "sensor1"},
+  "source": {"ip": "192.168.25.129", "port": 53000, "local": true},
+  "destination": {"ip": "4.2.2.1", "port": 53, "local": false},
+  "network": {"protocol": "dns", "protocols": ["dns"], "transport": "udp", "direction": "outbound", "bytes": 190, "packets": 2},
+  "conn": {"duration": 0.02, "orig_bytes": 80, "resp_bytes": 110, "orig_pkts": 1, "resp_pkts": 1},
+  "dns": {"query": "example.com", "qtype_name": "A", "rcode_name": "NOERROR", "query_length": 11, "label_count": 2, "longest_label_length": 7, "is_txt": false, "is_nxdomain": false}
+}

@@ -1,0 +1,446 @@
+# =============================================================
+# pipelines.yaml — Zeek logs via Vector → Data Prepper → OpenSearch
+#
+# Strategy: rename fields to SA "raw_field" names so Security
+# Analytics auto-maps everything with zero manual mapping needed.
+#
+# SA schema reference:
+#   https://github.com/opensearch-project/security-analytics/tree/main/src/main/resources/OSMapping
+#   Log type used: network (network_logtype.json)
+#
+# Cert paths inside the container:
+#   ../certs/dataprepper → /usr/share/data-prepper/certs/dataprepper
+#   ../certs/ca          → /usr/share/data-prepper/certs/ca
+#
+# Vector POSTs to: https://dataprepper:2021/log/ingest
+# =============================================================
+
+zeek-ingestion-pipeline:
+  workers: 4
+  delay: 3000
+
+  source:
+    http:
+      port: 2021
+      path: /log/ingest
+      health_check_service: true
+      unauthenticated_health_check: false
+      ssl: true
+      ssl_certificate_file: /usr/share/data-prepper/certs/dataprepper/dataprepper.crt
+      ssl_key_file: /usr/share/data-prepper/certs/dataprepper/dataprepper.key
+      authentication:
+        http_basic:
+          username: "vector"
+          password: "vector"
+      request_timeout: 10000
+      thread_count: 200
+      max_connection_count: 500
+      max_pending_requests: 1024
+      max_request_length: 10mb
+
+  buffer:
+    bounded_blocking:
+      buffer_size: 4096
+      batch_size: 512
+
+  processor:
+    # ----------------------------------------------------------
+    # 1. SA needs "timestamp" as a raw_field.
+    #    Vector already sets @timestamp from Zeek's ts field,
+    #    so we copy it. Both keys are preserved.
+    # ----------------------------------------------------------
+    - copy_values:
+        entries:
+          - from_key: "@timestamp"
+            to_key: "timestamp"
+            overwrite_if_to_key_exists: true
+
+    # ----------------------------------------------------------
+    # 2. HTTP — rename Zeek field names to SA raw_field names
+    #
+    #    Zeek field         SA raw_field (network_logtype.json)
+    #    ─────────────────  ────────────────────────────────────
+    #    method          →  http.request.method
+    #    status_code     →  http.response.status_code
+    #    request_body_len→  http.request.body.bytes
+    #    uri             →  url.path
+    #    user_agent      →  user_agent.name
+    #
+    #    These fields only exist on http log events. Renaming
+    #    them globally is safe — other log types won't have them.
+    #
+    #    NOT renamed (already match SA raw_field exactly):
+    #    resp_mime_types → resp_mime_types  (SA raw_field confirmed)
+    # ----------------------------------------------------------
+    - rename_keys:
+        entries:
+          - from_key: "method"
+            to_key: "http.request.method"
+            overwrite_if_to_key_exists: false
+          - from_key: "status_code"
+            to_key: "http.response.status_code"
+            overwrite_if_to_key_exists: false
+          - from_key: "request_body_len"
+            to_key: "http.request.body.bytes"
+            overwrite_if_to_key_exists: false
+          - from_key: "uri"
+            to_key: "url.path"
+            overwrite_if_to_key_exists: false
+          - from_key: "user_agent"
+            to_key: "user_agent.name"
+            overwrite_if_to_key_exists: false
+
+    # ----------------------------------------------------------
+    # 3. Firewall/netflow + SMB
+    #
+    #    Zeek field         SA raw_field (network_logtype.json)
+    #    ─────────────────  ────────────────────────────────────
+    #    action          →  netflow.firewall_event
+    #
+    #    This rename serves double duty:
+    #      - smb_files.log emits "action" (e.g. SMB::FILE_OPEN)
+    #        which SA maps via raw_field "netflow.firewall_event"
+    #      - Any other log type emitting "action" is covered too
+    # ----------------------------------------------------------
+    - rename_keys:
+        entries:
+          - from_key: "action"
+            to_key: "netflow.firewall_event"
+            overwrite_if_to_key_exists: false
+
+    # ----------------------------------------------------------
+    # 4. Fields that already match SA raw_field names exactly
+    #    — NO renaming needed. Listed here for traceability.
+    #
+    #    Log type      Zeek field          SA raw_field
+    #    ────────────  ──────────────────  ──────────────────
+    #    Common        id.orig_h           id.orig_h
+    #    Common        id.orig_p           id.orig_p
+    #    Common        id.resp_h           id.resp_h
+    #    Common        id.resp_p           id.resp_p
+    #    Common        service             service
+    #    DNS           query               query
+    #    DNS           qtype_name          qtype_name
+    #    DNS           answers             answers
+    #    DNS           Z                   Z
+    #    DNS           rejected            rejected
+    #    DCE/RPC       endpoint            endpoint
+    #    DCE/RPC       operation           operation
+    #    SMB files     name                name
+    #    SMB files/map path                path
+    #    SSL/Kerberos  cipher              cipher
+    #    Kerberos      request_type        request_type
+    #    x509          certificate.serial  certificate.serial
+    #    HTTP          resp_mime_types     resp_mime_types
+    #
+    #    Fields present in Zeek logs but NOT in SA network schema
+    #    (they will be indexed as-is, available for search/dashboards
+    #    but won't trigger SA detector rules):
+    #      conn:    proto, duration, orig_bytes, resp_bytes,
+    #               conn_state, history, orig_pkts, resp_pkts,
+    #               orig_ip_bytes, resp_ip_bytes, community_id
+    #      dns:     trans_id, qclass, qclass_name, rcode,
+    #               rcode_name, AA, TC, RD, RA, TTLs
+    #      http:    trans_depth, host, version, response_body_len,
+    #               orig_fuids, resp_fuids, orig_mime_types
+    #      ssl:     version, curve, server_name, resumed,
+    #               established, ssl_history, last_alert
+    #      ssh:     auth_success, auth_attempts, client, server,
+    #               cipher_alg, mac_alg, compression_alg, kex_alg,
+    #               host_key_alg, host_key_fingerprint
+    #      ntlm:    username, hostname, domainname,
+    #               server_nb_computer_name, server_dns_computer_name,
+    #               success
+    #      ftp:     command, reply_code, reply_msg, password,
+    #               data_channel.*
+    #      ldap:    message_id, version, opcode, result, object,
+    #               argument, diagnostic_message
+    #      smb:     times.*, size, share_type
+    #      dce_rpc: rtt, named_pipe
+    #      files:   fuid, source, depth, analyzers, mime_type,
+    #               seen_bytes, total_bytes, missing_bytes, md5,
+    #               sha1, sha256
+    # ----------------------------------------------------------
+
+    # ----------------------------------------------------------
+    # 5. Pipeline metadata
+    # ----------------------------------------------------------
+    - add_entries:
+        entries:
+          - key: "data_stream.type"
+            value: "logs"
+            overwrite_if_key_exists: false
+          - key: "data_stream.dataset"
+            value: "zeek"
+            overwrite_if_key_exists: false
+          - key: "log_type"
+            value: "unknown"
+            add_when: '/log_type == null'
+# ----------------------------------------------------------
+    # 6. Rename version.* fields from software.log to sw_version.*
+    #    to prevent mapping collision with http/ssl "version" string
+    # ----------------------------------------------------------
+    - rename_keys:
+        entries:
+          - from_key: "version.major"
+            to_key: "sw_version.major"
+            overwrite_if_to_key_exists: false
+          - from_key: "version.minor"
+            to_key: "sw_version.minor"
+            overwrite_if_to_key_exists: false
+          - from_key: "version.minor2"
+            to_key: "sw_version.minor2"
+            overwrite_if_to_key_exists: false
+          - from_key: "version.minor3"
+            to_key: "sw_version.minor3"
+            overwrite_if_to_key_exists: false
+          - from_key: "version.addl"
+            to_key: "sw_version.addl"
+            overwrite_if_to_key_exists: false
+
+  # ------------------------------------------------------------
+  # Route by log_type (set by Vector from the log filename)
+  # ------------------------------------------------------------
+  route:
+    - zeek-conn:     '/log_type == "conn"'
+    - zeek-dns:      '/log_type == "dns"'
+    - zeek-http:     '/log_type == "http"'
+    - zeek-ssl:      '/log_type == "ssl"'
+    - zeek-files:    '/log_type == "files"'
+    - zeek-weird:    '/log_type == "weird"'
+    - zeek-notice:   '/log_type == "notice"'
+    - zeek-dce-rpc:  '/log_type == "dce_rpc"'
+    - zeek-smb:      '/log_type == "smb_files" or /log_type == "smb_mapping"'
+    - zeek-kerberos: '/log_type == "kerberos"'
+    - zeek-x509:     '/log_type == "x509"'
+    - zeek-ntlm:     '/log_type == "ntlm"'
+    - zeek-ssh:      '/log_type == "ssh"'
+    - zeek-ftp:      '/log_type == "ftp"'
+    - zeek-ldap:     '/log_type == "ldap"'
+    - zeek-other:    'not (/log_type == "conn" or /log_type == "dns" or /log_type == "http" or /log_type == "ssl" or /log_type == "files" or /log_type == "weird" or /log_type == "notice" or /log_type == "dce_rpc" or /log_type == "smb_files" or /log_type == "smb_mapping" or /log_type == "kerberos" or /log_type == "x509" or /log_type == "ntlm" or /log_type == "ssh" or /log_type == "ftp" or /log_type == "ldap")'
+
+  # ------------------------------------------------------------
+  # Sinks — one per log type, routed accordingly
+  # ------------------------------------------------------------
+  sink:
+    - opensearch:
+        hosts: ["https://opensearch-node1:9200"]
+        username: "admin"
+        password: "admin"
+        insecure: false
+        cert: /usr/share/data-prepper/certs/ca/ca.crt
+        index_type: custom
+        index: "zeek-conn-%{yyyy.MM.dd}"
+        routes: [zeek-conn]
+        bulk_size: 4
+        max_retries: 5
+        dlq_file: /tmp/dp-dlq-conn.log
+
+    - opensearch:
+        hosts: ["https://opensearch-node1:9200"]
+        username: "admin"
+        password: "admin"
+        insecure: false
+        cert: /usr/share/data-prepper/certs/ca/ca.crt
+        index_type: custom
+        index: "zeek-dns-%{yyyy.MM.dd}"
+        routes: [zeek-dns]
+        bulk_size: 4
+        max_retries: 5
+        dlq_file: /tmp/dp-dlq-dns.log
+
+    - opensearch:
+        hosts: ["https://opensearch-node1:9200"]
+        username: "admin"
+        password: "admin"
+        insecure: false
+        cert: /usr/share/data-prepper/certs/ca/ca.crt
+        index_type: custom
+        index: "zeek-http-%{yyyy.MM.dd}"
+        routes: [zeek-http]
+        bulk_size: 4
+        max_retries: 5
+        dlq_file: /tmp/dp-dlq-http.log
+
+    - opensearch:
+        hosts: ["https://opensearch-node1:9200"]
+        username: "admin"
+        password: "admin"
+        insecure: false
+        cert: /usr/share/data-prepper/certs/ca/ca.crt
+        index_type: custom
+        index: "zeek-ssl-%{yyyy.MM.dd}"
+        routes: [zeek-ssl]
+        bulk_size: 4
+        max_retries: 5
+        dlq_file: /tmp/dp-dlq-ssl.log
+
+    - opensearch:
+        hosts: ["https://opensearch-node1:9200"]
+        username: "admin"
+        password: "admin"
+        insecure: false
+        cert: /usr/share/data-prepper/certs/ca/ca.crt
+        index_type: custom
+        index: "zeek-files-%{yyyy.MM.dd}"
+        routes: [zeek-files]
+        bulk_size: 4
+        max_retries: 5
+        dlq_file: /tmp/dp-dlq-files.log
+
+    - opensearch:
+        hosts: ["https://opensearch-node1:9200"]
+        username: "admin"
+        password: "admin"
+        insecure: false
+        cert: /usr/share/data-prepper/certs/ca/ca.crt
+        index_type: custom
+        index: "zeek-weird-%{yyyy.MM.dd}"
+        routes: [zeek-weird]
+        bulk_size: 4
+        max_retries: 5
+        dlq_file: /tmp/dp-dlq-weird.log
+
+    - opensearch:
+        hosts: ["https://opensearch-node1:9200"]
+        username: "admin"
+        password: "admin"
+        insecure: false
+        cert: /usr/share/data-prepper/certs/ca/ca.crt
+        index_type: custom
+        index: "zeek-notice-%{yyyy.MM.dd}"
+        routes: [zeek-notice]
+        bulk_size: 4
+        max_retries: 5
+        dlq_file: /tmp/dp-dlq-notice.log
+
+    - opensearch:
+        hosts: ["https://opensearch-node1:9200"]
+        username: "admin"
+        password: "admin"
+        insecure: false
+        cert: /usr/share/data-prepper/certs/ca/ca.crt
+        index_type: custom
+        index: "zeek-dce_rpc-%{yyyy.MM.dd}"
+        routes: [zeek-dce-rpc]
+        bulk_size: 4
+        max_retries: 5
+        dlq_file: /tmp/dp-dlq-dce_rpc.log
+
+    - opensearch:
+        hosts: ["https://opensearch-node1:9200"]
+        username: "admin"
+        password: "admin"
+        insecure: false
+        cert: /usr/share/data-prepper/certs/ca/ca.crt
+        index_type: custom
+        index: "zeek-smb-%{yyyy.MM.dd}"
+        routes: [zeek-smb]
+        bulk_size: 4
+        max_retries: 5
+        dlq_file: /tmp/dp-dlq-smb.log
+
+    - opensearch:
+        hosts: ["https://opensearch-node1:9200"]
+        username: "admin"
+        password: "admin"
+        insecure: false
+        cert: /usr/share/data-prepper/certs/ca/ca.crt
+        index_type: custom
+        index: "zeek-kerberos-%{yyyy.MM.dd}"
+        routes: [zeek-kerberos]
+        bulk_size: 4
+        max_retries: 5
+        dlq_file: /tmp/dp-dlq-kerberos.log
+
+    - opensearch:
+        hosts: ["https://opensearch-node1:9200"]
+        username: "admin"
+        password: "admin"
+        insecure: false
+        cert: /usr/share/data-prepper/certs/ca/ca.crt
+        index_type: custom
+        index: "zeek-x509-%{yyyy.MM.dd}"
+        routes: [zeek-x509]
+        bulk_size: 4
+        max_retries: 5
+        dlq_file: /tmp/dp-dlq-x509.log
+
+    - opensearch:
+        hosts: ["https://opensearch-node1:9200"]
+        username: "admin"
+        password: "admin"
+        insecure: false
+        cert: /usr/share/data-prepper/certs/ca/ca.crt
+        index_type: custom
+        index: "zeek-ntlm-%{yyyy.MM.dd}"
+        routes: [zeek-ntlm]
+        bulk_size: 4
+        max_retries: 5
+        dlq_file: /tmp/dp-dlq-ntlm.log
+
+    - opensearch:
+        hosts: ["https://opensearch-node1:9200"]
+        username: "admin"
+        password: "admin"
+        insecure: false
+        cert: /usr/share/data-prepper/certs/ca/ca.crt
+        index_type: custom
+        index: "zeek-ssh-%{yyyy.MM.dd}"
+        routes: [zeek-ssh]
+        bulk_size: 4
+        max_retries: 5
+        dlq_file: /tmp/dp-dlq-ssh.log
+
+    - opensearch:
+        hosts: ["https://opensearch-node1:9200"]
+        username: "admin"
+        password: "admin"
+        insecure: false
+        cert: /usr/share/data-prepper/certs/ca/ca.crt
+        index_type: custom
+        index: "zeek-ftp-%{yyyy.MM.dd}"
+        routes: [zeek-ftp]
+        bulk_size: 4
+        max_retries: 5
+        dlq_file: /tmp/dp-dlq-ftp.log
+
+    - opensearch:
+        hosts: ["https://opensearch-node1:9200"]
+        username: "admin"
+        password: "admin"
+        insecure: false
+        cert: /usr/share/data-prepper/certs/ca/ca.crt
+        index_type: custom
+        index: "zeek-ldap-%{yyyy.MM.dd}"
+        routes: [zeek-ldap]
+        bulk_size: 4
+        max_retries: 5
+        dlq_file: /tmp/dp-dlq-ldap.log
+
+    - opensearch:
+        hosts: ["https://opensearch-node1:9200"]
+        username: "admin"
+        password: "admin"
+        insecure: false
+        cert: /usr/share/data-prepper/certs/ca/ca.crt
+        index_type: custom
+        index: "zeek-other-%{yyyy.MM.dd}"
+        routes: [zeek-other]
+        bulk_size: 4
+        max_retries: 5
+        dlq_file: /tmp/dp-dlq-other.log
+
+
+
+    - opensearch:
+        hosts: ["https://opensearch-node1:9200"]
+        username: "admin"
+        password: "admin"
+        insecure: false
+        cert: /usr/share/data-prepper/certs/ca/ca.crt
+        index_type: custom
+        index: "zeek-logs"
+        bulk_size: 4
+        max_retries: 5
+        dlq_file: /tmp/dp-dlq-zeek-logs.log

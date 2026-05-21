@@ -1,0 +1,57 @@
+---
+zeek_interface: eth0
+offload_disable: true
+
+# Vector package/version — keep in sync with group_vars/sensors.yml
+vector_version: "0.54.0"
+vector_deb_url: "https://packages.timber.io/vector/{{ vector_version }}/vector_{{ vector_version }}-1_amd64.deb"
+vector_deb_tmp: "/tmp/vector_{{ vector_version }}.deb"
+
+# Vector runtime
+vector_user: "vector"
+vector_group: "vector"
+vector_service_name: "vector"
+vector_config_path: "/etc/vector/vector.toml"
+vector_data_dir: "/var/lib/vector"
+vector_log_dir: "/var/log/vector"
+
+# CA install
+ca_cert_dest: "/usr/local/share/ca-certificates/ndr-internal-ca.crt"
+
+# Data Prepper endpoint (resolved on sensors via /etc/hosts)
+dataprepper_host_alias: "dataprepper"
+dataprepper_port: 2021
+dataprepper_ingest_path: "/log/ingest"
+
+# Zeek defaults (override in group_vars if needed)
+zeek_logs_dir: "/opt/zeek/logs/current"
+zeek_service_name: "zeek"
+
+# Auth defaults (password must be in vault)
+dp_basic_user: "vector"
+dp_basic_pass: "vector"
+
+# Zeek binary discovery — first match wins
+zeek_bin_candidates:
+  - /opt/zeek/bin/zeek
+  - /usr/local/zeek/bin/zeek
+  - /usr/bin/zeek
+  - /usr/sbin/zeek
+
+# Checksum state file path (do not change between runs)
+zeek_checksum_path: "/var/lib/zeek-ansible-checksum"
+
+
+
+# Zeek security
+zeek_digest_salt: "CHANGE_ME_IN_VAULT"
+
+# Default private ranges
+zeek_local_networks:
+  - "10.0.0.0/8"
+  - "172.16.0.0/12"
+  - "192.168.0.0/16"
+
+# Zeek notice tuning
+zeek_default_suppression_interval: "1hr"
+zeek_ignored_notice_types: []

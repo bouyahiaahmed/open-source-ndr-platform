@@ -1,0 +1,27 @@
+{
+  "index_patterns": ["ndr-sessionizer-state"],
+  "template": {
+    "settings": {
+      "index": {
+        "number_of_shards": 1,
+        "number_of_replicas": 0
+      }
+    },
+    "mappings": {
+      "dynamic": "strict",
+      "properties": {
+        "last_successful_timestamp": { "type": "date" },
+        "last_run_time": { "type": "date" },
+        "documents_read": { "type": "long" },
+        "sessions_updated": { "type": "long" },
+        "failures": { "type": "long" },
+        "service_version": { "type": "keyword" }
+      }
+    }
+  },
+  "priority": 500,
+  "_meta": {
+    "service": "ndr-sessionizer",
+    "version": "0.1.0"
+  }
+}

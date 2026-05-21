@@ -1,0 +1,38 @@
+# =============================================================
+# data-prepper.yml — Data Prepper server/management configuration
+#
+# This file is for the management API only (port 4900).
+# Port 4900 is NOT exposed in docker-compose, so we disable
+# management API TLS here to avoid needing a Java keystore (p12).
+#
+# TLS for the actual data ingestion port (2021) is configured
+# in pipelines.yaml under the http source — that uses PEM files
+# directly and works fine without any keystore.
+#
+# Supports environment variable interpolation unlike pipelines.yaml.
+# =============================================================
+
+# Disable TLS on the management API (port 4900 is internal-only)
+ssl: false
+
+serverPort: 4900
+
+# Protect the management/metrics endpoints with basic auth
+# These env vars ARE supported here
+authentication:
+  http_basic:
+    username: "${DP_HTTP_USERNAME}"
+    password: "${DP_HTTP_PASSWORD}"
+
+# Heap circuit breaker — rejects incoming data before OOM
+# Tune usage to ~75% of your -Xmx value (default -Xmx4g → use 3gb)
+circuit_breakers:
+  heap:
+    usage: 3gb
+    check_interval: 500ms
+    reset: 1s
+
+processorShutdownTimeout: 30s
+sinkShutdownTimeout: 30s
+pipeline_configurations:
+  - /usr/share/data-prepper/pipelines/*.yml

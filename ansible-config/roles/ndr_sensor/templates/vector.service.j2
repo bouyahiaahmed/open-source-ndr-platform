@@ -1,0 +1,26 @@
+[Unit]
+Description=Vector (Zeek -> Data Prepper HTTPS)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User={{ vector_user }}
+Group={{ vector_group }}
+ExecStart=/usr/bin/vector --config {{ vector_config_path }}
+Restart=always
+RestartSec=3
+Environment=VECTOR_LOG=info
+
+CPUQuota=15%
+MemoryMax=250M
+TasksMax=200
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths={{ vector_data_dir }} {{ vector_log_dir }}
+ReadOnlyPaths={{ zeek_logs_dir }}
+
+[Install]
+WantedBy=multi-user.target

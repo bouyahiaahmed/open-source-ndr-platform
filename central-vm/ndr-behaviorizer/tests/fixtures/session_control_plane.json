@@ -1,0 +1,10 @@
+{
+  "@timestamp": "2026-05-06T16:40:00Z",
+  "session": {"id": "cp-1", "first_seen": "2026-05-06T16:40:00Z", "last_seen": "2026-05-06T16:40:01Z", "log_types": ["conn"], "flow_based": true, "excluded_from_behavior": true, "category": "control_plane", "noise_reasons": ["control_plane"]},
+  "sessionizer": {"updated_at": "2026-05-06T16:40:04Z"},
+  "sensor": {"name": "sensor1"},
+  "source": {"ip": "192.168.25.129", "port": 53004, "local": true},
+  "destination": {"ip": "192.168.25.128", "port": 9200, "local": true},
+  "network": {"protocol": "opensearch", "protocols": ["opensearch"], "transport": "tcp", "direction": "internal", "bytes": 1000, "packets": 5},
+  "conn": {"duration": 1.0, "orig_bytes": 400, "resp_bytes": 600, "orig_pkts": 2, "resp_pkts": 3}
+}

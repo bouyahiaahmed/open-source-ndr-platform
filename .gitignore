@@ -1,0 +1,134 @@
+# ============================================================
+# Global .gitignore for open-source-ndr-platform
+# ============================================================
+
+# ----------------------------
+# Secrets / credentials
+# ----------------------------
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+**/secrets/**
+**/*secret*
+**/*credentials*
+**/*password*
+**/*token*
+**/smtp_auth.yaml
+**/users/users.json
+**/*vault*.yml
+**/*vault*.yaml
+**/sensors_vault.yml
+
+# ----------------------------
+# Certificates / private keys
+# ----------------------------
+**/certs/**
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.srl
+id_rsa*
+id_ed25519*
+
+# ----------------------------
+# Python
+# ----------------------------
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+env/
+
+# ----------------------------
+# Node / frontend
+# ----------------------------
+node_modules/
+dist/
+build/
+.next/
+.cache/
+
+# ----------------------------
+# Docker / runtime data
+# ----------------------------
+docker-data/
+data/
+volumes/
+opensearch-data/
+opensearch-data*/
+wazuh-data/
+*.pid
+
+# ----------------------------
+# Logs / generated outputs
+# ----------------------------
+logs/
+*.log
+*.out
+*.err
+results/
+output/
+outputs/
+reports/generated/
+tmp/
+temp/
+
+# ----------------------------
+# Zeek / Vector generated data
+# ----------------------------
+**/zeek/logs/**
+**/logs/current/**
+**/spool/**
+**/vector-data/**
+**/vector-data-dir/**
+/var/lib/vector/
+
+# ----------------------------
+# Backups / local snapshots
+# ----------------------------
+backups/
+*.bak
+*.bak.*
+*.backup
+*.backup.*
+*.old
+*.orig
+*.tmp
+*.swp
+*.swo
+
+# ----------------------------
+# Archives / heavy files
+# ----------------------------
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.7z
+*.rar
+*.iso
+*.qcow2
+*.vmdk
+*.ova
+*.ovf
+
+# ----------------------------
+# OS / IDE
+# ----------------------------
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

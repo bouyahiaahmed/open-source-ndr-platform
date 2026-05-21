@@ -1,0 +1,12 @@
+[Unit]
+Description=Disable NIC Offloading for Zeek
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c "for i in {1..5}; do /sbin/ethtool -K {{ zeek_interface }} rx off tx off tso off gso off gro off && exit 0; sleep 2; done; exit 1"
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

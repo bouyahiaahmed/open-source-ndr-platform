@@ -1,0 +1,33 @@
+services:
+  ndr-flow-collector:
+    build:
+      context: .
+    container_name: ndr-flow-collector
+    restart: unless-stopped
+    env_file:
+      - .env
+    # Linux lab-friendly mode: UDP/2055 binds directly on the hub VM,
+    # and the container can reach OpenSearch on 127.0.0.1 if OpenSearch is published there.
+    network_mode: host
+    environment:
+      FLOW_COLLECTOR_PORT: "2055"
+      FLOW_LISTEN: "netflow://:2055"
+
+      OS_URL: "${OS_URL:-https://127.0.0.1:9200}"
+      OS_USER: "${OS_USER:-admin}"
+      OS_PASS: "${OS_PASS:-admin}"
+      OS_VERIFY_SSL: "${OS_VERIFY_SSL:-false}"
+      OS_CA_CERT: "${OS_CA_CERT:-}"
+
+      OS_INDEX_PREFIX: "${OS_INDEX_PREFIX:-ndr-flows}"
+      APPLY_TEMPLATE_ON_START: "${APPLY_TEMPLATE_ON_START:-true}"
+      BULK_SIZE: "${BULK_SIZE:-50}"
+      BULK_FLUSH_SECONDS: "${BULK_FLUSH_SECONDS:-5}"
+
+      FLOW_OBSERVER_VENDOR: "${FLOW_OBSERVER_VENDOR:-pfsense}"
+      FLOW_OBSERVER_TYPE: "${FLOW_OBSERVER_TYPE:-firewall}"
+      NDR_ENV: "${NDR_ENV:-lab}"
+      NDR_COLLECTOR_NAME: "${NDR_COLLECTOR_NAME:-goflow2}"
+      KEEP_RAW_GOFLOW: "${KEEP_RAW_GOFLOW:-true}"
+    volumes:
+      - ../certs/ca/ca.crt:/certs/ca/ca.crt:ro

@@ -1,0 +1,23 @@
+central_dataprepper_ip: "10.51.1.11"
+dataprepper_host_alias: "dataprepper"
+dataprepper_port: 2021
+dataprepper_ingest_path: "/log/ingest"
+
+vector_version: "0.54.0"
+vector_user: "vector"
+vector_group: "vector"
+
+# Zeek logs path (set to your real one)
+zeek_logs_dir: "/opt/zeek/logs/current"
+
+# Basic auth for Data Prepper
+dp_basic_user: "vector"
+dp_basic_pass: "vector"
+
+# If Zeek package/service naming differs, override per environment
+zeek_service_name: "zeek"
+vector_service_name: "vector"
+
+
+zeek_local_networks:
+  - "10.51.1.0/24"

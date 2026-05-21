@@ -1,0 +1,41 @@
+opensearch_url: https://opensearch-node1:9200
+opensearch_username: admin
+opensearch_password: admin
+opensearch_ca_cert: /certs/ca/ca.crt
+opensearch_verify_certs: true
+
+source_index_pattern: ndr-sessions*
+target_index_prefix: ndr-behaviors
+state_index: ndr-behaviorizer-state
+
+process_time_field: sessionizer.updated_at
+event_time_field: '@timestamp'
+behavior_window_seconds: 3600
+lookback_overlap_seconds: 7200
+initial_lookback_seconds: 86400
+poll_interval_seconds: 60
+read_page_size: 500
+bulk_size: 500
+
+feature_set: host_hourly_v1
+feature_config_path: /app/features/host_hourly_v1.yaml
+behavior_entity_mode: host_sensor
+
+run_once: false
+dry_run: false
+http_host: 0.0.0.0
+http_port: 8080
+checkpoint_id: default
+service_version: 0.2.0
+
+ml_enabled: true
+ml_min_training_rows: 20
+ml_contamination: 0.05
+ml_training_max_docs: 2000
+ml_training_min_quality_score: 80
+ml_score_current_only: true
+behavior_max_session_refs: 200
+behavior_min_sessions_for_ml: 2
+ml_model_artifact_path: /tmp/ndr_behaviorizer_model.pkl
+findings_enabled: true
+findings_index_prefix: ndr-findings

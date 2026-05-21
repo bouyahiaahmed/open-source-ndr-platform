@@ -1,0 +1,20 @@
+{
+  "@timestamp": "2026-05-05T14:44:39.100Z",
+  "log_type": "ssl",
+  "sensor": "sensor1",
+  "uid": "CjCShr3NQntSvbTNr3",
+  "community_id": "1:nAa9F4lNANiGLKfCN85x7VrP+ok=",
+  "id.orig_h": "192.168.25.129",
+  "id.orig_p": 36456,
+  "id.resp_h": "104.154.89.105",
+  "id.resp_p": 443,
+  "version": "TLSv12",
+  "cipher": "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+  "curve": "secp256r1",
+  "server_name": "self-signed.badssl.com",
+  "validation_status": "self signed certificate",
+  "established": true,
+  "resumed": false,
+  "sni_matches_cert": true,
+  "next_protocol": "http/1.1"
+}

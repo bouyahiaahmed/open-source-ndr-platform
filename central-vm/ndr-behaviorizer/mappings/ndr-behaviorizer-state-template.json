@@ -1,0 +1,44 @@
+{
+  "index_patterns": [
+    "ndr-behaviorizer-state"
+  ],
+  "template": {
+    "settings": {
+      "index": {
+        "number_of_shards": 1,
+        "number_of_replicas": 0
+      }
+    },
+    "mappings": {
+      "dynamic": "strict",
+      "properties": {
+        "last_successful_timestamp": {
+          "type": "date"
+        },
+        "last_run_time": {
+          "type": "date"
+        },
+        "documents_read": {
+          "type": "long"
+        },
+        "behaviors_written": {
+          "type": "long"
+        },
+        "findings_written": {
+          "type": "long"
+        },
+        "failures": {
+          "type": "long"
+        },
+        "service_version": {
+          "type": "keyword"
+        }
+      }
+    }
+  },
+  "priority": 250,
+  "_meta": {
+    "component": "ndr-behaviorizer",
+    "version": "0.2.0"
+  }
+}

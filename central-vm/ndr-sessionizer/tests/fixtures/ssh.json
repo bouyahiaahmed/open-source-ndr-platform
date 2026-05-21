@@ -1,0 +1,20 @@
+{
+  "@timestamp": "2026-05-05T14:44:39.200Z",
+  "log_type": "ssh",
+  "sensor": "sensor1",
+  "uid": "Cssh123",
+  "community_id": "1:sshcommunity",
+  "id.orig_h": "192.168.25.129",
+  "id.orig_p": 50000,
+  "id.resp_h": "192.168.25.130",
+  "id.resp_p": 22,
+  "auth_success": false,
+  "auth_attempts": 3,
+  "client": "SSH-2.0-OpenSSH_9.2",
+  "server": "SSH-2.0-OpenSSH_9.2",
+  "cipher_alg": "chacha20-poly1305@openssh.com",
+  "mac_alg": "umac-64-etm@openssh.com",
+  "kex_alg": "curve25519-sha256",
+  "host_key_alg": "ssh-ed25519",
+  "host_key_fingerprint": "SHA256:abc"
+}

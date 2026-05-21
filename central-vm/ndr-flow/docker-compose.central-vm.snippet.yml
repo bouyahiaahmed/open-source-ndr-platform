@@ -1,0 +1,34 @@
+# Add this service inside central-vm/docker/docker-compose.yml.
+# Adjust the network name if your compose file uses another network.
+
+  ndr-flow-collector:
+    build:
+      context: ../ndr-flow-collector
+    container_name: ndr-flow-collector
+    restart: unless-stopped
+    ports:
+      - "2055:2055/udp"
+    environment:
+      FLOW_COLLECTOR_PORT: "2055"
+      FLOW_LISTEN: "netflow://:2055"
+
+      OS_URL: "https://os-node-1:9200"
+      OS_USER: "${NDR_ADMIN_USERNAME:-admin}"
+      OS_PASS: "${NDR_ADMIN_PASSWORD:-admin}"
+      OS_VERIFY_SSL: "true"
+      OS_CA_CERT: "/certs/ca/ca.crt"
+
+      OS_INDEX_PREFIX: "ndr-flows"
+      APPLY_TEMPLATE_ON_START: "true"
+      BULK_SIZE: "50"
+      BULK_FLUSH_SECONDS: "5"
+
+      FLOW_OBSERVER_VENDOR: "pfsense"
+      FLOW_OBSERVER_TYPE: "firewall"
+      NDR_ENV: "lab"
+      NDR_COLLECTOR_NAME: "goflow2"
+      KEEP_RAW_GOFLOW: "true"
+    volumes:
+      - ../certs/ca/ca.crt:/certs/ca/ca.crt:ro
+    networks:
+      - ndr-net

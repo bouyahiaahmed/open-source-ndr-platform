@@ -1,0 +1,35 @@
+services:
+  ndr-sessionizer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ndr-sessionizer:0.1.0
+    container_name: ndr-sessionizer
+    restart: unless-stopped
+    environment:
+      OPENSEARCH_URL: "https://opensearch:9200"
+      OPENSEARCH_USERNAME: "${NDR_ADMIN_USERNAME:-admin}"
+      OPENSEARCH_PASSWORD: "${NDR_ADMIN_PASSWORD:-admin}"
+      OPENSEARCH_CA_CERT: "/certs/ca/ca.crt"
+      OPENSEARCH_VERIFY_CERTS: "true"
+      SOURCE_INDEX_PATTERN: "zeek-logs*"
+      TARGET_INDEX_PREFIX: "ndr-sessions"
+      STATE_INDEX: "ndr-sessionizer-state"
+      POLL_INTERVAL_SECONDS: "30"
+      LOOKBACK_OVERLAP_SECONDS: "120"
+      BULK_SIZE: "500"
+      MAX_EVENTS_PER_LOG_TYPE_PER_SESSION: "20"
+      MAX_EVIDENCE_ITEMS: "100"
+      PRESERVE_RAW_EVENT_FIELDS: "true"
+      HTTP_PORT: "8080"
+    volumes:
+      - ./certs:/certs:ro
+      - ./config.example.yaml:/app/config.yaml:ro
+    ports:
+      - "8080:8080"
+    networks:
+      - ndr
+
+networks:
+  ndr:
+    external: true

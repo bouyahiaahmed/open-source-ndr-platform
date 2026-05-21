@@ -1,0 +1,18 @@
+{
+  "@timestamp": "2026-05-05T14:44:38.900Z",
+  "log_type": "dns",
+  "sensor": "sensor1",
+  "uid": "CjCShr3NQntSvbTNr3",
+  "community_id": "1:nAa9F4lNANiGLKfCN85x7VrP+ok=",
+  "id.orig_h": "192.168.25.129",
+  "id.orig_p": 52000,
+  "id.resp_h": "8.8.8.8",
+  "id.resp_p": 53,
+  "proto": "udp",
+  "query": "example.com",
+  "qtype": 1,
+  "qtype_name": "A",
+  "rcode_name": "NOERROR",
+  "answers": ["93.184.216.34"],
+  "TTLs": [300.0]
+}

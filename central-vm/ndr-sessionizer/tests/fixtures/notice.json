@@ -1,0 +1,14 @@
+{
+  "@timestamp": "2026-05-05T14:44:39.400Z",
+  "log_type": "notice",
+  "sensor": "sensor1",
+  "uid": "CjCShr3NQntSvbTNr3",
+  "community_id": "1:nAa9F4lNANiGLKfCN85x7VrP+ok=",
+  "id.orig_h": "192.168.25.129",
+  "id.resp_h": "104.154.89.105",
+  "note": "SSL::Invalid_Server_Cert",
+  "msg": "SSL certificate validation failed with self signed certificate",
+  "actions": ["Notice::ACTION_LOG"],
+  "sub": "self signed certificate",
+  "suppress_for": 3600.0
+}
