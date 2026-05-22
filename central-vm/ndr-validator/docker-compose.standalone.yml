@@ -1,0 +1,30 @@
+services:
+  ndr-validator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ndr-validator:2.0.0
+    container_name: ndr-validator
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${VALIDATOR_PORT:-8000}:8000"
+    volumes:
+      - ndr-validator-data:/data
+      # Optional but recommended: allows the validator to check whether central containers are running.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Optional CA mount if you set INSECURE_SKIP_VERIFY=false and CA_CERT_PATH=/certs/ca/ca.crt.
+      - ${CA_CERT_LOCAL_DIR:-./certs/ca}:/certs/ca:ro
+    networks:
+      - ndr-backend
+
+volumes:
+  ndr-validator-data:
+
+networks:
+  ndr-backend:
+    external: true
+    # Set this to the actual Docker network used by your central-vm compose.
+    # Examples: central-vm_backend, docker_backend, or simply backend.
+    name: ${NDR_DOCKER_NETWORK:-central-vm_backend}

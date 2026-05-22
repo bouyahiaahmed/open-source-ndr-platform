@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NDR Validator</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="page-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">N</div>
+        <div>
+          <div class="brand-title">NDR Validator</div>
+          <div class="brand-subtitle">Pipeline health cockpit</div>
+        </div>
+      </div>
+      <nav class="nav">
+        <button class="nav-item active" data-tab="overview">Overview</button>
+        <button class="nav-item" data-tab="pipeline">Pipeline</button>
+        <button class="nav-item" data-tab="checks">Checks</button>
+        <button class="nav-item" data-tab="sensors">Sensors</button>
+        <button class="nav-item" data-tab="history">History</button>
+        <button class="nav-item" data-tab="config">Config</button>
+      </nav>
+      <div class="sidebar-card">
+        <div class="tiny-label">Auto refresh</div>
+        <select id="refreshInterval">
+          <option value="15000">15 seconds</option>
+          <option value="30000" selected>30 seconds</option>
+          <option value="60000">1 minute</option>
+          <option value="0">Off</option>
+        </select>
+      </div>
+    </aside>
+
+    <main class="content">
+      <header class="topbar">
+        <div>
+          <div class="eyebrow">Standalone validation UI</div>
+          <h1>End-to-end NDR health</h1>
+          <p id="subtitle">Loading latest scan…</p>
+        </div>
+        <div class="top-actions">
+          <button id="runScan" class="primary">Run validation now</button>
+          <button id="reload" class="secondary">Refresh</button>
+        </div>
+      </header>
+
+      <section id="overview" class="tab active">
+        <div class="hero-grid">
+          <div class="score-card">
+            <div class="score-ring" id="scoreRing"><span id="scoreValue">--</span></div>
+            <div>
+              <div class="tiny-label">Global posture</div>
+              <div id="globalStatus" class="status-pill unknown">unknown</div>
+              <p id="generatedAt" class="muted"></p>
+            </div>
+          </div>
+          <div class="highlight-card">
+            <div class="section-title">What needs attention</div>
+            <ul id="highlights" class="highlight-list"></ul>
+          </div>
+        </div>
+
+        <div class="section-row">
+          <h2>Components</h2>
+          <span class="muted">Score is penalized by critical, warning, and unknown checks.</span>
+        </div>
+        <div id="componentsGrid" class="components-grid"></div>
+      </section>
+
+      <section id="pipeline" class="tab">
+        <div class="section-row">
+          <h2>Pipeline timeline</h2>
+          <span class="muted">From raw Zeek logs to sessions, behaviors, ML, findings, and alerts.</span>
+        </div>
+        <div id="pipelineTimeline" class="pipeline"></div>
+        <div class="data-grid">
+          <div class="panel"><h3>Raw data</h3><pre id="rawData"></pre></div>
+          <div class="panel"><h3>Sessions</h3><pre id="sessionData"></pre></div>
+          <div class="panel"><h3>Behaviors / ML</h3><pre id="behaviorData"></pre></div>
+        </div>
+      </section>
+
+      <section id="checks" class="tab">
+        <div class="toolbar">
+          <input id="searchChecks" placeholder="Search checks, components, remediation…" />
+          <select id="statusFilter">
+            <option value="all">All statuses</option>
+            <option value="crit">Critical</option>
+            <option value="warn">Warning</option>
+            <option value="unknown">Unknown</option>
+            <option value="ok">OK</option>
+          </select>
+          <select id="componentFilter"><option value="all">All components</option></select>
+        </div>
+        <div id="checksList" class="checks-list"></div>
+      </section>
+
+      <section id="sensors" class="tab">
+        <div class="section-row"><h2>Sensors & Vector</h2><span class="muted">Vector Prometheus checks and observed OpenSearch sensor identities.</span></div>
+        <div id="sensorsGrid" class="components-grid"></div>
+      </section>
+
+      <section id="history" class="tab">
+        <div class="section-row"><h2>Validation history</h2><span class="muted">Latest 100 scans stored in SQLite.</span></div>
+        <div class="panel"><table id="historyTable"><thead><tr><th>Time</th><th>Status</th><th>Score</th><th>Duration</th><th>Scan ID</th></tr></thead><tbody></tbody></table></div>
+      </section>
+
+      <section id="config" class="tab">
+        <div class="section-row"><h2>Effective safe config</h2><span class="muted">Secrets are not exposed here.</span></div>
+        <div class="panel"><pre id="configBlock"></pre></div>
+      </section>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

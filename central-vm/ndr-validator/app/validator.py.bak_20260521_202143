@@ -1,0 +1,870 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import time
+import uuid
+from collections import defaultdict
+from urllib.parse import urlparse
+from typing import Any, Awaitable, Callable
+
+import httpx
+
+from app.clients import OpenSearchClient, basic_auth, docker_get, fetch
+from app.config import settings
+from app.models import CheckResult, ComponentSummary, ScanSummary, Status, now_ms, score_from_checks, worst_status
+from app.prometheus_parser import Sample, parse_prometheus, top_samples
+from app import storage
+from app.time_utils import age_seconds, iso_now, seconds_to_human
+
+
+def result(
+    id: str,
+    name: str,
+    component: str,
+    status: Status,
+    summary: str,
+    *,
+    details: str = "",
+    remediation: str = "",
+    evidence: dict[str, Any] | None = None,
+    metrics: dict[str, float | int] | None = None,
+    started_ms: float | None = None,
+) -> CheckResult:
+    duration = 0.0 if started_ms is None else max(0.0, now_ms() - started_ms)
+    return CheckResult(
+        id=id,
+        name=name,
+        component=component,
+        status=status,
+        summary=summary,
+        details=details,
+        remediation=remediation,
+        evidence=evidence or {},
+        metrics=metrics or {},
+        duration_ms=round(duration, 2),
+    )
+
+
+def classify_age(age: float | None, warn: int, crit: int) -> Status:
+    if age is None:
+        return Status.UNKNOWN
+    if age >= crit:
+        return Status.CRIT
+    if age >= warn:
+        return Status.WARN
+    return Status.OK
+
+
+def status_for_http(code: int, *, ok_under: int = 400) -> Status:
+    if 200 <= code < ok_under:
+        return Status.OK
+    if code in {401, 403, 404, 405}:
+        return Status.WARN
+    return Status.CRIT
+
+
+def prom_counter_delta(sample: Sample, namespace: str) -> float | None:
+    key = f"prom:{namespace}:{sample.key}"
+    previous = storage.get_metric_value(key)
+    storage.set_metric_value(key, sample.value, iso_now())
+    if previous is None:
+        return None
+    if sample.value < previous:
+        # Counter reset: do not flag.
+        return 0.0
+    return sample.value - previous
+
+
+async def safe_check(func: Callable[..., Awaitable[CheckResult]], *args: Any, component: str = "validator", **kwargs: Any) -> CheckResult:
+    try:
+        return await func(*args, **kwargs)
+    except Exception as exc:
+        return result(
+            id=f"{getattr(func, '__name__', 'check')}_exception",
+            name=getattr(func, "__name__", "check"),
+            component=component,
+            status=Status.UNKNOWN,
+            summary=f"Check failed unexpectedly: {type(exc).__name__}",
+            details=str(exc),
+            remediation="Open the validator logs with `docker logs ndr-validator` and verify the target URL, credentials, TLS settings, and network connectivity.",
+        )
+
+
+class Validator:
+    def __init__(self) -> None:
+        self.os = OpenSearchClient()
+        self.data: dict[str, Any] = {}
+        self.sensors: list[dict[str, Any]] = []
+        self.pipeline: list[dict[str, Any]] = []
+
+    async def run(self) -> ScanSummary:
+        started = time.perf_counter()
+        checks: list[CheckResult] = []
+
+        # Run core connectivity first so later failures are easier to understand.
+        core_checks = await asyncio.gather(
+            safe_check(self.check_opensearch_connectivity, component="opensearch"),
+            safe_check(self.check_dashboards, component="dashboards"),
+            safe_check(self.check_dataprepper, component="dataprepper"),
+            safe_check(self.check_service_endpoint, "sessionizer", "Sessionizer", settings.sessionizer_url, component="sessionizer"),
+            safe_check(self.check_service_endpoint, "behaviorizer", "Behaviorizer", settings.behaviorizer_url, component="behaviorizer"),
+            safe_check(self.check_service_endpoint, "ml_service", "ML service", settings.ml_service_url, component="ml"),
+            return_exceptions=False,
+        )
+        checks.extend(core_checks)
+
+        # OpenSearch-based checks are run after connectivity. They are resilient if OS is down.
+        more_checks = await asyncio.gather(
+            safe_check(self.check_opensearch_health, component="opensearch"),
+            safe_check(self.check_opensearch_indices, component="opensearch"),
+            safe_check(self.check_opensearch_templates, component="opensearch"),
+            safe_check(self.check_raw_freshness, component="raw_ingestion"),
+            safe_check(self.check_log_type_coverage, component="raw_ingestion"),
+            safe_check(self.check_sensor_coverage, component="raw_ingestion"),
+            safe_check(self.check_raw_schema_quality, component="raw_ingestion"),
+            safe_check(self.check_session_pipeline, component="sessionizer"),
+            safe_check(self.check_behavior_pipeline, component="behaviorizer"),
+            safe_check(self.check_ml_pipeline, component="ml"),
+            safe_check(self.check_elastalert, component="elastalert"),
+            safe_check(self.check_netflow, component="netflow"),
+            safe_check(self.check_docker_containers, component="docker"),
+            return_exceptions=False,
+        )
+        checks.extend(more_checks)
+
+        vector_checks = await safe_check(self.check_vector_targets, component="vector")
+        if isinstance(vector_checks, CheckResult):
+            vector_checks = [vector_checks]
+        checks.extend(vector_checks)
+
+        components = self._component_summaries(checks)
+        global_status = worst_status([check.status for check in checks if check.component != "optional"])
+        score = score_from_checks(checks)
+        highlights = self._highlights(checks)
+        duration_ms = (time.perf_counter() - started) * 1000
+        summary = ScanSummary(
+            scan_id=str(uuid.uuid4()),
+            generated_at=iso_now(),
+            duration_ms=round(duration_ms, 2),
+            status=global_status,
+            score=score,
+            components=components,
+            checks=checks,
+            highlights=highlights,
+            pipeline=self.pipeline,
+            sensors=self.sensors,
+            data=self.data,
+        )
+        storage.save_scan(summary.to_dict())
+        return summary
+
+    def _component_summaries(self, checks: list[CheckResult]) -> list[ComponentSummary]:
+        labels = {
+            "opensearch": "OpenSearch",
+            "dashboards": "Dashboards",
+            "dataprepper": "Data Prepper",
+            "vector": "Vector sensors",
+            "raw_ingestion": "Raw Zeek ingestion",
+            "sessionizer": "Sessionizer",
+            "behaviorizer": "Behaviorizer",
+            "ml": "ML & findings",
+            "elastalert": "ElastAlert2",
+            "netflow": "NetFlow",
+            "docker": "Docker runtime",
+        }
+        grouped: dict[str, list[CheckResult]] = defaultdict(list)
+        for check in checks:
+            grouped[check.component].append(check)
+        summaries: list[ComponentSummary] = []
+        for component, items in sorted(grouped.items()):
+            statuses = [item.status for item in items]
+            total = len(items)
+            score = score_from_checks(items)
+            summaries.append(
+                ComponentSummary(
+                    name=component,
+                    label=labels.get(component, component.replace("_", " ").title()),
+                    status=worst_status(statuses),
+                    total=total,
+                    ok=sum(1 for item in items if item.status == Status.OK),
+                    warn=sum(1 for item in items if item.status == Status.WARN),
+                    crit=sum(1 for item in items if item.status == Status.CRIT),
+                    unknown=sum(1 for item in items if item.status == Status.UNKNOWN),
+                    score=score,
+                )
+            )
+        return summaries
+
+    def _highlights(self, checks: list[CheckResult]) -> list[str]:
+        critical = [c.summary for c in checks if c.status == Status.CRIT]
+        warnings = [c.summary for c in checks if c.status == Status.WARN]
+        if critical:
+            return critical[:6]
+        if warnings:
+            return warnings[:6]
+        return ["All configured NDR validator checks are healthy."]
+
+    async def check_opensearch_connectivity(self) -> CheckResult:
+        start = now_ms()
+        try:
+            code, payload, elapsed = await self.os.get("/")
+            if code < 400 and isinstance(payload, dict):
+                version = payload.get("version", {}).get("number", "unknown")
+                cluster = payload.get("cluster_name", "unknown")
+                self.data.setdefault("opensearch", {})["version"] = version
+                return result(
+                    "opensearch.connectivity",
+                    "OpenSearch API reachable",
+                    "opensearch",
+                    Status.OK,
+                    f"OpenSearch is reachable; cluster={cluster}, version={version}.",
+                    evidence={"http_status": code, "cluster": cluster, "version": version, "url": settings.opensearch_url},
+                    metrics={"response_ms": round(elapsed, 2)},
+                    started_ms=start,
+                )
+            return result(
+                "opensearch.connectivity",
+                "OpenSearch API reachable",
+                "opensearch",
+                Status.CRIT,
+                f"OpenSearch returned HTTP {code}.",
+                remediation="Check OPENSEARCH_URL, credentials, CA/TLS settings, and whether the opensearch container is running.",
+                evidence={"http_status": code, "payload": payload},
+                started_ms=start,
+            )
+        except Exception as exc:
+            return result(
+                "opensearch.connectivity",
+                "OpenSearch API reachable",
+                "opensearch",
+                Status.CRIT,
+                "OpenSearch is not reachable from the validator.",
+                details=str(exc),
+                remediation="Attach the validator to the same Docker network as OpenSearch or use the host URL, then verify username/password and TLS settings.",
+                evidence={"url": settings.opensearch_url},
+                started_ms=start,
+            )
+
+    async def check_opensearch_health(self) -> CheckResult:
+        start = now_ms()
+        code, payload, elapsed = await self.os.get("/_cluster/health")
+        if code >= 400 or not isinstance(payload, dict):
+            return result(
+                "opensearch.cluster_health",
+                "Cluster health",
+                "opensearch",
+                Status.CRIT,
+                "Cannot read OpenSearch cluster health.",
+                remediation="Fix OpenSearch connectivity/credentials first; this check depends on the cluster health API.",
+                evidence={"http_status": code, "payload": payload},
+                started_ms=start,
+            )
+        health = str(payload.get("status", "unknown")).lower()
+        status = Status.OK if health == "green" else Status.WARN if health == "yellow" else Status.CRIT
+        self.data.setdefault("opensearch", {})["cluster_health"] = payload
+        return result(
+            "opensearch.cluster_health",
+            "Cluster health",
+            "opensearch",
+            status,
+            f"OpenSearch cluster health is {health}.",
+            details="Yellow can be acceptable in a one-node lab if replicas are configured. Red means at least one primary shard is unavailable.",
+            remediation="If red, inspect `_cat/shards`, disk watermarks, index allocation, and OpenSearch logs.",
+            evidence=payload,
+            metrics={"response_ms": round(elapsed, 2), "nodes": int(payload.get("number_of_nodes", 0) or 0)},
+            started_ms=start,
+        )
+
+    async def check_opensearch_indices(self) -> CheckResult:
+        start = now_ms()
+        code, payload, elapsed = await self.os.get("/_cat/indices", params={"format": "json", "h": "index,health,status,docs.count,store.size"})
+        if code >= 400 or not isinstance(payload, list):
+            return result(
+                "opensearch.indices",
+                "Required index families",
+                "opensearch",
+                Status.CRIT,
+                "Cannot list OpenSearch indices.",
+                evidence={"http_status": code, "payload": payload},
+                started_ms=start,
+            )
+        indices = [str(item.get("index", "")) for item in payload]
+        required_prefixes = {
+            "zeek raw": "zeek-",
+            "sessions": "ndr-sessions-",
+            "behaviors": "ndr-behaviors-",
+        }
+        missing = [label for label, prefix in required_prefixes.items() if not any(i.startswith(prefix) for i in indices)]
+        status = Status.OK if not missing else Status.WARN if "behaviors" in missing or "sessions" in missing else Status.CRIT
+        self.data.setdefault("opensearch", {})["indices"] = payload[:200]
+        return result(
+            "opensearch.indices",
+            "Required index families",
+            "opensearch",
+            status,
+            "All core index families exist." if not missing else f"Missing index families: {', '.join(missing)}.",
+            details="The validator expects Zeek raw logs, sessions, and behaviors. Findings/alerts/flows are allowed to be empty until demos generate them.",
+            remediation="If sessions or behaviors are missing, check ndr-sessionizer/ndr-behaviorizer readiness and their OpenSearch credentials. If zeek-* is missing, check Vector and Data Prepper.",
+            evidence={"missing": missing, "index_count": len(indices), "sample": payload[:25]},
+            metrics={"response_ms": round(elapsed, 2), "index_count": len(indices)},
+            started_ms=start,
+        )
+
+    async def check_opensearch_templates(self) -> CheckResult:
+        start = now_ms()
+        expected = [
+            "zeek-logs-template-v1",
+            "ndr-sessions-template",
+            "ndr-behaviors-template",
+            "ndr-findings-template",
+        ]
+        missing: list[str] = []
+        present: list[str] = []
+        for template in expected:
+            code, payload, _elapsed = await self.os.get(f"/_index_template/{template}")
+            if code == 200:
+                present.append(template)
+            else:
+                missing.append(template)
+        status = Status.OK if not missing else Status.WARN
+        return result(
+            "opensearch.templates",
+            "Index templates installed",
+            "opensearch",
+            status,
+            "All expected index templates are installed." if not missing else f"Missing templates: {', '.join(missing)}.",
+            remediation="Run the template init containers or scripts before starting ingestion, otherwise mappings may drift and break dashboards/correlation.",
+            evidence={"present": present, "missing": missing},
+            started_ms=start,
+        )
+
+    async def check_dashboards(self) -> CheckResult:
+        start = now_ms()
+        if not settings.dashboards_url:
+            return result("dashboards.status", "Dashboards status", "dashboards", Status.UNKNOWN, "Dashboards URL is not configured.", started_ms=start)
+        try:
+            code, text, elapsed, _headers = await fetch(
+                f"{settings.dashboards_url.rstrip('/')}/api/status",
+                auth=basic_auth(settings.dashboards_user, settings.dashboards_password),
+                verify=settings.verify_for("dashboards"),
+                headers={"osd-xsrf": "true"},
+            )
+            state = "unknown"
+            try:
+                payload = json.loads(text)
+                state = str(payload.get("status", {}).get("overall", {}).get("state") or payload.get("status", {}).get("overall", {}).get("level") or "unknown")
+            except Exception:
+                payload = text[:500]
+            if code < 400:
+                status = Status.OK if state.lower() in {"available", "green", "ok", "unknown"} else Status.WARN
+                summary = f"OpenSearch Dashboards API is reachable; state={state}."
+            else:
+                status = Status.CRIT if code >= 500 else Status.WARN
+                summary = f"OpenSearch Dashboards returned HTTP {code}."
+            evidence: dict[str, Any] = {"http_status": code, "state": state, "url": settings.dashboards_url}
+            if code >= 400:
+                evidence["response_sample"] = text[:500]
+            return result(
+                "dashboards.status",
+                "Dashboards status API",
+                "dashboards",
+                status,
+                summary,
+                remediation="Check the dashboards container, `opensearch_dashboards.yml`, TLS certs, server user credentials, and OpenSearch connectivity.",
+                evidence=evidence,
+                metrics={"response_ms": round(elapsed, 2)},
+                started_ms=start,
+            )
+        except Exception as exc:
+            return result(
+                "dashboards.status",
+                "Dashboards status API",
+                "dashboards",
+                Status.CRIT,
+                "OpenSearch Dashboards is not reachable.",
+                details=str(exc),
+                remediation="Attach the validator to the Dashboards Docker network or expose/use the correct DASHBOARDS_URL.",
+                evidence={"url": settings.dashboards_url},
+                started_ms=start,
+            )
+
+    async def check_dataprepper(self) -> CheckResult:
+        start = now_ms()
+        try:
+            code, text, elapsed, _ = await fetch(
+                settings.dataprepper_metrics_url,
+                auth=basic_auth(settings.dataprepper_user, settings.dataprepper_password),
+                verify=settings.verify_for("dataprepper"),
+            )
+            if code >= 400:
+                return result(
+                    "dataprepper.metrics",
+                    "Data Prepper metrics",
+                    "dataprepper",
+                    Status.CRIT,
+                    f"Data Prepper metrics endpoint returned HTTP {code}.",
+                    remediation="Check DATAPREPPER_METRICS_URL, management port 4900, credentials, and TLS settings.",
+                    evidence={"http_status": code, "url": settings.dataprepper_metrics_url, "response_sample": text[:500]},
+                    started_ms=start,
+                )
+            samples = parse_prometheus(text)
+            error_samples = [s for s in samples if any(word in s.name.lower() for word in ["error", "fail", "drop", "reject", "dlq", "exception"])]
+            deltas: list[dict[str, Any]] = []
+            bad_delta = 0.0
+            for sample in error_samples[:300]:
+                delta = prom_counter_delta(sample, "dataprepper")
+                if delta and delta > 0:
+                    bad_delta += delta
+                    deltas.append({"metric": sample.name, "labels": sample.labels, "delta": delta, "value": sample.value})
+            status = Status.OK if bad_delta == 0 else Status.CRIT if bad_delta >= 10 else Status.WARN
+            self.data.setdefault("dataprepper", {})["metrics_sample_count"] = len(samples)
+            return result(
+                "dataprepper.metrics",
+                "Data Prepper metrics and errors",
+                "dataprepper",
+                status,
+                "Data Prepper metrics are reachable with no new error/drop deltas." if bad_delta == 0 else f"Data Prepper has new error/drop/failure counter deltas: {bad_delta:g}.",
+                details="The first run establishes a counter baseline. Later runs compare Prometheus counters to catch silent drops, DLQ growth, sink failures, and pipeline exceptions.",
+                remediation="Inspect Data Prepper logs, DLQ files, OpenSearch sink auth/TLS, and pipeline route/sink definitions.",
+                evidence={"sample_count": len(samples), "new_error_deltas": deltas[:20], "top_error_counters": top_samples(error_samples, [""], limit=12)},
+                metrics={"response_ms": round(elapsed, 2), "error_delta": bad_delta, "metric_samples": len(samples)},
+                started_ms=start,
+            )
+        except Exception as exc:
+            return result(
+                "dataprepper.metrics",
+                "Data Prepper metrics and errors",
+                "dataprepper",
+                Status.CRIT,
+                "Data Prepper metrics are not reachable.",
+                details=str(exc),
+                remediation="Attach validator to the Data Prepper network, expose port 4900, or set DATAPREPPER_METRICS_URL to the host-accessible URL.",
+                evidence={"url": settings.dataprepper_metrics_url},
+                started_ms=start,
+            )
+
+    async def check_service_endpoint(self, service_id: str, label: str, base_url: str) -> CheckResult:
+        component = "sessionizer" if service_id == "sessionizer" else "behaviorizer" if service_id == "behaviorizer" else "ml"
+        start = now_ms()
+        if not base_url:
+            return result(f"{service_id}.ready", f"{label} readiness", component, Status.UNKNOWN, f"{label} URL is not configured.", started_ms=start)
+        ready_url = f"{base_url.rstrip('/')}/readyz"
+        try:
+            code, text, elapsed, _ = await fetch(ready_url, verify=False)
+            if code == 200:
+                status = Status.OK
+                summary = f"{label} readiness endpoint is healthy."
+            elif code == 503:
+                status = Status.CRIT
+                summary = f"{label} is reachable but not ready."
+            else:
+                status = Status.WARN if code < 500 else Status.CRIT
+                summary = f"{label} readiness endpoint returned HTTP {code}."
+            return result(
+                f"{service_id}.ready",
+                f"{label} readiness",
+                component,
+                status,
+                summary,
+                remediation=f"Check `{label}` container logs, OpenSearch credentials, CA certificate mount, and service healthcheck.",
+                evidence={"url": ready_url, "http_status": code, "response_sample": text[:500]},
+                metrics={"response_ms": round(elapsed, 2)},
+                started_ms=start,
+            )
+        except Exception as exc:
+            return result(
+                f"{service_id}.ready",
+                f"{label} readiness",
+                component,
+                Status.WARN if service_id == "ml_service" else Status.CRIT,
+                f"{label} readiness endpoint is not reachable.",
+                details=str(exc),
+                remediation=f"If the service exists, attach validator to the central Docker network or set {service_id.upper()}_URL to the host-mapped port.",
+                evidence={"url": ready_url},
+                started_ms=start,
+            )
+
+    async def check_raw_freshness(self) -> CheckResult:
+        start = now_ms()
+        ts, elapsed, evidence = await self.os.latest_timestamp(settings.raw_index_pattern)
+        age = age_seconds(ts)
+        status = classify_age(age, settings.raw_fresh_warn_seconds, settings.raw_fresh_crit_seconds)
+        count_15m, _, _ = await self.os.count(settings.raw_index_pattern, {"range": {"@timestamp": {"gte": "now-15m", "lte": "now"}}})
+        self.data.setdefault("raw", {})["latest_timestamp"] = ts
+        self.data.setdefault("raw", {})["count_15m"] = count_15m or 0
+        self.pipeline.append({"stage": "raw", "label": "Zeek raw logs", "status": status.value, "latest": ts, "age_seconds": age, "count_15m": count_15m or 0})
+        return result(
+            "raw.freshness",
+            "Raw Zeek log freshness",
+            "raw_ingestion",
+            status,
+            f"Latest raw Zeek event age is {seconds_to_human(age)}." if ts else "No raw Zeek events found.",
+            remediation="If stale, check Zeek service, Vector file tailing, Vector sink delivery, Data Prepper ingest route, and OpenSearch sinks.",
+            evidence={"latest_timestamp": ts, **evidence},
+            metrics={"response_ms": round(elapsed, 2), "age_seconds": -1 if age is None else round(age, 2), "count_15m": count_15m or 0},
+            started_ms=start,
+        )
+
+    async def check_log_type_coverage(self) -> CheckResult:
+        start = now_ms()
+        buckets, elapsed, evidence = await self.os.terms(settings.raw_index_pattern, "log_type", minutes=60, size=50)
+        present = {str(b.get("key")): int(b.get("doc_count", 0)) for b in buckets}
+        missing = [lt for lt in settings.required_log_types if lt not in present]
+        status = Status.OK if not missing else Status.WARN if len(missing) <= max(1, len(settings.required_log_types) // 2) else Status.CRIT
+        self.data.setdefault("raw", {})["log_types_60m"] = present
+        return result(
+            "raw.log_type_coverage",
+            "Zeek log type coverage",
+            "raw_ingestion",
+            status,
+            "All required Zeek log types were observed in the last hour." if not missing else f"Missing required log types in the last hour: {', '.join(missing)}.",
+            details="Some logs such as files/ssh/notice naturally depend on traffic. Mark continuously required logs through REQUIRED_LOG_TYPES only if your demo/baseline should produce them.",
+            remediation="If conn/dns/http/ssl are missing unexpectedly, verify Zeek analyzers, Vector source glob paths, log_type extraction, and Data Prepper routing.",
+            evidence={"present": present, "missing": missing},
+            metrics={"response_ms": round(elapsed, 2), "missing_count": len(missing)},
+            started_ms=start,
+        )
+
+    async def check_sensor_coverage(self) -> CheckResult:
+        start = now_ms()
+        best_field = None
+        best_buckets: list[dict[str, Any]] = []
+        best_elapsed = 0.0
+        for field in settings.sensor_field_candidates:
+            buckets, elapsed, _ = await self.os.terms(settings.raw_index_pattern, field, minutes=60, size=100)
+            clean = [b for b in buckets if b.get("key") != "__missing__"]
+            if clean:
+                best_field = field
+                best_buckets = clean
+                best_elapsed = elapsed
+                break
+        observed = {str(b.get("key")): int(b.get("doc_count", 0)) for b in best_buckets}
+        expected = settings.expected_sensors
+        missing = []
+        if expected:
+            observed_keys = set(observed)
+            missing = [sensor for sensor in expected if sensor not in observed_keys]
+        status = Status.UNKNOWN if not best_field else Status.OK
+        if expected and missing:
+            status = Status.CRIT if len(missing) == len(expected) else Status.WARN
+        if not best_field:
+            summary = "No sensor identity field could be found in recent raw logs."
+        elif missing:
+            summary = f"Some expected sensors did not send raw logs in the last hour: {', '.join(missing)}."
+        else:
+            summary = f"Observed {len(observed)} sensor(s) in raw logs using field `{best_field}`."
+        self.sensors = [{"name": k, "raw_docs_60m": v, "status": "ok" if k not in missing else "crit"} for k, v in observed.items()]
+        return result(
+            "raw.sensor_coverage",
+            "Sensor coverage",
+            "raw_ingestion",
+            status,
+            summary,
+            remediation="Make sure Vector adds a stable sensor field such as sensor.name, and set EXPECTED_SENSORS to the exact values used in OpenSearch.",
+            evidence={"sensor_field": best_field, "observed": observed, "expected": expected, "missing": missing},
+            metrics={"response_ms": round(best_elapsed, 2), "observed_sensors": len(observed), "missing_sensors": len(missing)},
+            started_ms=start,
+        )
+
+    async def check_raw_schema_quality(self) -> CheckResult:
+        start = now_ms()
+        bad: list[dict[str, Any]] = []
+        max_missing = 0.0
+        for field in settings.required_raw_fields:
+            pct, missing, total, elapsed, _evidence = await self.os.missing_field_percent(settings.raw_index_pattern, field, minutes=60)
+            if pct is None:
+                continue
+            max_missing = max(max_missing, pct)
+            if pct > settings.max_missing_required_field_percent:
+                bad.append({"field": field, "missing_percent": round(pct, 2), "missing": missing, "total": total})
+        status = Status.OK if not bad else Status.CRIT if any(x["missing_percent"] > 25 for x in bad) else Status.WARN
+        return result(
+            "raw.schema_quality",
+            "Raw schema quality",
+            "raw_ingestion",
+            status,
+            "Required raw fields are present in recent documents." if not bad else f"Some required raw fields are missing too often: {', '.join(x['field'] for x in bad)}.",
+            remediation="Check Vector transforms, Data Prepper field renames, and index templates. Missing @timestamp/source/destination fields break freshness, correlation, and dashboards.",
+            evidence={"bad_fields": bad, "required_fields": settings.required_raw_fields, "window": "last_60m"},
+            metrics={"max_missing_percent": round(max_missing, 2)},
+            started_ms=start,
+        )
+
+    async def check_session_pipeline(self) -> CheckResult:
+        start = now_ms()
+        raw_count, _, _ = await self.os.count(settings.raw_index_pattern, {"range": {"@timestamp": {"gte": "now-30m", "lte": "now"}}})
+        session_count, _, _ = await self.os.count(settings.sessions_index_pattern, {"range": {"@timestamp": {"gte": "now-30m", "lte": "now"}}})
+        ts, _elapsed, evidence = await self.os.latest_timestamp(settings.sessions_index_pattern)
+        age = age_seconds(ts)
+        status = classify_age(age, settings.session_fresh_warn_seconds, settings.session_fresh_crit_seconds)
+        if raw_count and raw_count > 0 and (session_count or 0) == 0:
+            status = Status.CRIT
+        missing_fields: list[str] = []
+        for field in settings.required_session_fields:
+            pct, missing, total, _e, _ = await self.os.missing_field_percent(settings.sessions_index_pattern, field, minutes=120)
+            if pct is not None and pct > settings.max_missing_required_field_percent:
+                missing_fields.append(field)
+        if missing_fields and status == Status.OK:
+            status = Status.WARN
+        excluded_count, _, _ = await self.os.count(settings.sessions_index_pattern, {"bool": {"filter": [{"range": {"@timestamp": {"gte": "now-2h", "lte": "now"}}}, {"term": {"session.excluded_from_behavior": True}}]}})
+        total_2h, _, _ = await self.os.count(settings.sessions_index_pattern, {"range": {"@timestamp": {"gte": "now-2h", "lte": "now"}}})
+        excluded_pct = (excluded_count or 0) * 100 / total_2h if total_2h else 0.0
+        if total_2h and excluded_pct > settings.max_excluded_session_percent_warn and status == Status.OK:
+            status = Status.WARN
+        self.data.setdefault("sessions", {}).update({"latest_timestamp": ts, "count_30m": session_count or 0, "excluded_percent_2h": round(excluded_pct, 2)})
+        self.pipeline.append({"stage": "sessions", "label": "Correlated sessions", "status": status.value, "latest": ts, "age_seconds": age, "count_30m": session_count or 0})
+        return result(
+            "sessionizer.output",
+            "Raw-to-session correlation",
+            "sessionizer",
+            status,
+            f"Sessions latest age={seconds_to_human(age)}, raw_30m={raw_count or 0}, sessions_30m={session_count or 0}.",
+            remediation="If sessions are absent while raw logs exist, check ndr-sessionizer readiness, SOURCE_INDEX_PATTERN=zeek-logs*, OpenSearch credentials, checkpoint state, and sessionizer logs.",
+            evidence={"latest_timestamp": ts, "missing_fields": missing_fields, "excluded_percent_2h": round(excluded_pct, 2), **evidence},
+            metrics={"raw_count_30m": raw_count or 0, "session_count_30m": session_count or 0, "age_seconds": -1 if age is None else round(age, 2), "excluded_percent_2h": round(excluded_pct, 2)},
+            started_ms=start,
+        )
+
+    async def check_behavior_pipeline(self) -> CheckResult:
+        start = now_ms()
+        session_count, _, _ = await self.os.count(settings.sessions_index_pattern, {"range": {"@timestamp": {"gte": "now-2h", "lte": "now"}}})
+        behavior_count, _, _ = await self.os.count(settings.behaviors_index_pattern, {"range": {"@timestamp": {"gte": "now-2h", "lte": "now"}}})
+        ts, _elapsed, evidence = await self.os.latest_timestamp(settings.behaviors_index_pattern)
+        age = age_seconds(ts)
+        status = classify_age(age, settings.behavior_fresh_warn_seconds, settings.behavior_fresh_crit_seconds)
+        if session_count and session_count > 0 and (behavior_count or 0) == 0:
+            status = Status.CRIT
+        ready_count, _, _ = await self.os.count(settings.behaviors_index_pattern, {"bool": {"filter": [{"range": {"@timestamp": {"gte": "now-24h", "lte": "now"}}}, {"term": {"ml.ready": True}}]}})
+        missing_fields: list[str] = []
+        for field in settings.required_behavior_fields:
+            pct, _missing, _total, _e, _ = await self.os.missing_field_percent(settings.behaviors_index_pattern, field, minutes=24 * 60)
+            if pct is not None and pct > settings.max_missing_required_field_percent:
+                missing_fields.append(field)
+        if missing_fields and status == Status.OK:
+            status = Status.WARN
+        self.data.setdefault("behaviors", {}).update({"latest_timestamp": ts, "count_2h": behavior_count or 0, "ml_ready_24h": ready_count or 0})
+        self.pipeline.append({"stage": "behaviors", "label": "Behavior windows", "status": status.value, "latest": ts, "age_seconds": age, "count_2h": behavior_count or 0, "ml_ready_24h": ready_count or 0})
+        return result(
+            "behaviorizer.output",
+            "Session-to-behavior aggregation",
+            "behaviorizer",
+            status,
+            f"Behaviors latest age={seconds_to_human(age)}, sessions_2h={session_count or 0}, behaviors_2h={behavior_count or 0}, ml_ready_24h={ready_count or 0}.",
+            remediation="If sessions exist but behaviors do not, check ndr-behaviorizer readiness, SOURCE_INDEX_PATTERN=ndr-sessions*, checkpoint, feature config path, quality gates, and service logs.",
+            evidence={"latest_timestamp": ts, "missing_fields": missing_fields, **evidence},
+            metrics={"session_count_2h": session_count or 0, "behavior_count_2h": behavior_count or 0, "ml_ready_24h": ready_count or 0, "age_seconds": -1 if age is None else round(age, 2)},
+            started_ms=start,
+        )
+
+    async def check_ml_pipeline(self) -> CheckResult:
+        start = now_ms()
+        ready_count, _, _ = await self.os.count(settings.behaviors_index_pattern, {"term": {"ml.ready": True}})
+        scored_count, _, _ = await self.os.count(settings.behaviors_index_pattern, {"exists": {"field": "ml.anomaly_score"}})
+        unscored_ready, _, _ = await self.os.count(settings.behaviors_index_pattern, {"bool": {"filter": [{"term": {"ml.ready": True}}], "must_not": [{"term": {"ml.scoring_status": "scored"}}, {"exists": {"field": "ml.anomaly_score"}}]}})
+        findings_count, _, _ = await self.os.count(settings.findings_index_pattern, {"match_all": {}})
+        model_count, _, _ = await self.os.count(settings.ml_models_index_pattern, {"match_all": {}})
+        status = Status.OK
+        if (ready_count or 0) >= settings.ml_min_ready_behaviors and (scored_count or 0) == 0:
+            status = Status.CRIT
+        elif (unscored_ready or 0) > settings.ml_max_unscored_ready_behaviors:
+            status = Status.WARN
+        elif (ready_count or 0) < settings.ml_min_ready_behaviors:
+            status = Status.WARN
+        self.data.setdefault("ml", {}).update({"ready_behaviors": ready_count or 0, "scored_behaviors": scored_count or 0, "unscored_ready_behaviors": unscored_ready or 0, "findings": findings_count or 0, "models": model_count or 0})
+        self.pipeline.append({"stage": "ml", "label": "ML scoring & findings", "status": status.value, "ready_behaviors": ready_count or 0, "scored_behaviors": scored_count or 0, "findings": findings_count or 0})
+        if status == Status.CRIT:
+            summary = f"ML-ready behaviors exist ({ready_count or 0}) but no behavior appears scored."
+        elif status == Status.WARN and (ready_count or 0) < settings.ml_min_ready_behaviors:
+            summary = f"Only {ready_count or 0} ML-ready behavior(s); model may still be waiting for training data."
+        elif status == Status.WARN:
+            summary = f"There are {unscored_ready or 0} ML-ready behaviors waiting for scoring."
+        else:
+            summary = f"ML pipeline has scored {scored_count or 0} behavior(s); findings={findings_count or 0}."
+        return result(
+            "ml.scoring",
+            "ML training/scoring health",
+            "ml",
+            status,
+            summary,
+            details="Findings can be zero in calm traffic. The important health signal is that ML-ready behaviors become scored and model metadata exists/updates.",
+            remediation="Check ndr-behavior-ml readiness, model volume, ML_MIN_TRAINING_ROWS, quality score gates, OpenSearch credentials, and ml_service logs.",
+            evidence={"ready_behaviors": ready_count, "scored_behaviors": scored_count, "unscored_ready": unscored_ready, "findings": findings_count, "model_docs": model_count},
+            metrics={"ready_behaviors": ready_count or 0, "scored_behaviors": scored_count or 0, "unscored_ready": unscored_ready or 0, "findings": findings_count or 0, "models": model_count or 0},
+            started_ms=start,
+        )
+
+    async def check_elastalert(self) -> CheckResult:
+        start = now_ms()
+        if not settings.enable_elastalert_checks:
+            return result("elastalert.disabled", "ElastAlert checks", "elastalert", Status.UNKNOWN, "ElastAlert checks are disabled.", started_ms=start)
+        status_count, _, _ = await self.os.count(settings.elastalert_status_index_pattern, {"match_all": {}})
+        alert_count, _, _ = await self.os.count(settings.alerts_index_pattern, {"match_all": {}})
+        recent_alert_count, _, _ = await self.os.count(settings.alerts_index_pattern, {"range": {"@timestamp": {"gte": "now-24h", "lte": "now"}}})
+        # No alerts is not a failure. Missing writeback index is a warning because ElastAlert may not have initialized.
+        if status_count is None:
+            status = Status.WARN
+            summary = "ElastAlert writeback index could not be queried."
+        elif status_count == 0:
+            status = Status.WARN
+            summary = "ElastAlert writeback index exists but has no state documents yet."
+        else:
+            status = Status.OK
+            summary = f"ElastAlert state is present; alerts_total={alert_count or 0}, alerts_24h={recent_alert_count or 0}."
+        return result(
+            "elastalert.state",
+            "ElastAlert2 state and indexed alerts",
+            "elastalert",
+            status,
+            summary,
+            details="No security alerts is normal unless you are running a demo. This check mainly confirms the writeback/indexer path exists.",
+            remediation="If writeback is missing, check elastalert2 container logs, config.yaml, rules folder, OpenSearch credentials, TLS CA, and whether rule field names match mappings.",
+            evidence={"writeback_docs": status_count, "alerts_total": alert_count, "alerts_24h": recent_alert_count},
+            metrics={"writeback_docs": status_count or 0, "alerts_total": alert_count or 0, "alerts_24h": recent_alert_count or 0},
+            started_ms=start,
+        )
+
+    async def check_netflow(self) -> CheckResult:
+        start = now_ms()
+        if not settings.enable_netflow_checks:
+            return result("netflow.disabled", "NetFlow checks", "netflow", Status.UNKNOWN, "NetFlow checks are disabled.", started_ms=start)
+        total, _, evidence = await self.os.count(settings.flows_index_pattern, {"match_all": {}})
+        if total is None:
+            return result("netflow.indices", "NetFlow index presence", "netflow", Status.UNKNOWN, "NetFlow index could not be queried.", evidence=evidence, started_ms=start)
+        if total == 0:
+            return result(
+                "netflow.indices",
+                "NetFlow ingestion",
+                "netflow",
+                Status.WARN,
+                "No NetFlow/IPFIX documents found. This is okay if the flow collector is not part of this deployment.",
+                remediation="If you expect firewall flows, check ndr-flow collector, UDP/2055 reachability, pfSense/OPNsense softflowd export target, and ndr-flows template.",
+                metrics={"flow_docs": 0},
+                evidence={"index_pattern": settings.flows_index_pattern},
+                started_ms=start,
+            )
+        ts, _, _ = await self.os.latest_timestamp(settings.flows_index_pattern)
+        age = age_seconds(ts)
+        status = classify_age(age, 1800, 7200)
+        return result(
+            "netflow.indices",
+            "NetFlow ingestion",
+            "netflow",
+            status,
+            f"NetFlow documents exist; latest age={seconds_to_human(age)}, total={total}.",
+            remediation="If stale, check firewall exporter and collector logs.",
+            metrics={"flow_docs": total, "age_seconds": -1 if age is None else round(age, 2)},
+            evidence={"latest_timestamp": ts, "index_pattern": settings.flows_index_pattern},
+            started_ms=start,
+        )
+
+    async def check_docker_containers(self) -> CheckResult:
+        start = now_ms()
+        if not settings.enable_docker_checks:
+            return result("docker.disabled", "Docker runtime", "docker", Status.UNKNOWN, "Docker checks are disabled.", started_ms=start)
+        try:
+            code, payload, elapsed = await docker_get("/containers/json?all=true")
+            if code >= 400 or not isinstance(payload, list):
+                raise RuntimeError(f"Docker API returned HTTP {code}")
+            containers = {}
+            for item in payload:
+                names = [n.lstrip("/") for n in item.get("Names", [])]
+                for name in names:
+                    containers[name] = item
+            missing = [name for name in settings.expected_containers if name not in containers]
+            not_running = [name for name in settings.expected_containers if name in containers and containers[name].get("State") != "running"]
+            status = Status.OK if not missing and not not_running else Status.CRIT if not_running else Status.WARN
+            return result(
+                "docker.containers",
+                "Expected Docker containers",
+                "docker",
+                status,
+                "All expected containers are running." if status == Status.OK else f"Docker issues: missing={missing}, not_running={not_running}.",
+                remediation="Mount `/var/run/docker.sock:/var/run/docker.sock:ro` for this check. If containers are stopped, inspect `docker ps -a` and container logs.",
+                evidence={"missing": missing, "not_running": not_running, "observed": {k: {"state": v.get("State"), "status": v.get("Status"), "image": v.get("Image")} for k, v in containers.items() if k in settings.expected_containers}},
+                metrics={"response_ms": round(elapsed, 2), "missing": len(missing), "not_running": len(not_running)},
+                started_ms=start,
+            )
+        except FileNotFoundError:
+            return result(
+                "docker.containers",
+                "Expected Docker containers",
+                "docker",
+                Status.UNKNOWN,
+                "Docker socket is not mounted; container runtime checks skipped.",
+                remediation="Add `/var/run/docker.sock:/var/run/docker.sock:ro` to the validator service if you want container status checks.",
+                evidence={"docker_socket": settings.docker_socket},
+                started_ms=start,
+            )
+        except Exception as exc:
+            return result(
+                "docker.containers",
+                "Expected Docker containers",
+                "docker",
+                Status.UNKNOWN,
+                "Docker runtime checks failed.",
+                details=str(exc),
+                remediation="Verify Docker socket mount and permissions.",
+                evidence={"docker_socket": settings.docker_socket},
+                started_ms=start,
+            )
+
+    async def check_vector_targets(self) -> list[CheckResult]:
+        if not settings.vector_targets:
+            return [result("vector.targets", "Vector Prometheus targets", "vector", Status.UNKNOWN, "No VECTOR_TARGETS configured. Vector metrics checks are skipped.", remediation="Set VECTOR_TARGETS like `sensor1=http://10.51.1.12:9598/metrics,sensor2=http://10.51.1.13:9598/metrics`.")]
+        tasks = [self._check_one_vector(label, url) for label, url in settings.vector_targets.items()]
+        return await asyncio.gather(*tasks)
+
+    async def _check_one_vector(self, label: str, url: str) -> CheckResult:
+        start = now_ms()
+        try:
+            code, text, elapsed, _ = await fetch(url, verify=False)
+            if code >= 400:
+                return result(
+                    f"vector.{label}.metrics",
+                    f"Vector metrics: {label}",
+                    "vector",
+                    Status.CRIT,
+                    f"Vector metrics endpoint for {label} returned HTTP {code}.",
+                    remediation="Check Vector service, Prometheus exporter source/sink, firewall/NSG, and VECTOR_TARGETS URL.",
+                    evidence={"url": url, "http_status": code, "response_sample": text[:500]},
+                    started_ms=start,
+                )
+            samples = parse_prometheus(text)
+            error_words = ["error", "errors", "discard", "discarded", "drop", "dropped", "failed", "failures"]
+            error_samples = [s for s in samples if any(word in s.name.lower() for word in error_words)]
+            sent = sum(s.value for s in samples if "sent" in s.name.lower() and "event" in s.name.lower())
+            received = sum(s.value for s in samples if "received" in s.name.lower() and "event" in s.name.lower())
+            bad_delta = 0.0
+            deltas: list[dict[str, Any]] = []
+            for sample in error_samples[:300]:
+                delta = prom_counter_delta(sample, f"vector:{label}")
+                if delta and delta > 0:
+                    bad_delta += delta
+                    deltas.append({"metric": sample.name, "labels": sample.labels, "delta": delta, "value": sample.value})
+            status = Status.OK if bad_delta == 0 else Status.CRIT if bad_delta >= 10 else Status.WARN
+            self.sensors.append({"name": label, "vector_metric_samples": len(samples), "vector_errors_delta": bad_delta, "status": status.value, "url": url})
+            return result(
+                f"vector.{label}.metrics",
+                f"Vector metrics: {label}",
+                "vector",
+                status,
+                f"Vector metrics reachable for {label}; new error/drop delta={bad_delta:g}." if bad_delta else f"Vector metrics reachable for {label}; no new error/drop deltas.",
+                details="First run establishes a counter baseline. Later runs catch silent Vector drops, sink errors, parse failures, and delivery issues.",
+                remediation="Inspect `journalctl -u vector`, Vector internal metrics, sink component IDs, TLS verification, Data Prepper credentials, and file source glob patterns.",
+                evidence={"url": url, "sample_count": len(samples), "new_error_deltas": deltas[:20], "top_error_counters": top_samples(error_samples, [""], limit=12)},
+                metrics={"response_ms": round(elapsed, 2), "metric_samples": len(samples), "new_error_delta": bad_delta, "sent_events_total_seen": round(sent, 2), "received_events_total_seen": round(received, 2)},
+                started_ms=start,
+            )
+        except Exception as exc:
+            return result(
+                f"vector.{label}.metrics",
+                f"Vector metrics: {label}",
+                "vector",
+                Status.CRIT,
+                f"Vector metrics endpoint is not reachable for {label}.",
+                details=str(exc),
+                remediation="Check Vector exporter is enabled on 0.0.0.0:9598, routing/firewall, and the exact VECTOR_TARGETS value.",
+                evidence={"url": url},
+                started_ms=start,
+            )
